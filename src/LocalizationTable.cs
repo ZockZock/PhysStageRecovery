@@ -112,6 +112,7 @@ namespace BoosterWatch
             { "#PSR_Skip_Journal", "recovery journal: <<1>>" },
             { "#PSR_Skip_NoLandingMeans", "neither parachutes nor a suitable engine" },
             { "#PSR_Skip_NoControlModule", "no control module on the booster" },
+            { "#PSR_Skip_ChuteOpen", "parachute is already open" },
             { "#PSR_Skip_NoChutesAndOff", "no parachutes, and powered landing is switched off" },
 
             // The status words the recovery journal stores. They are written to the save file in
@@ -162,7 +163,7 @@ namespace BoosterWatch
             { "#PSR_Help_IntroTitle", "What the mod does" },
             { "#PSR_Help_Intro", "Separated, unmanned stages land by themselves: parachutes, landing engine, landing legs, touchdown, recovery. Your rocket keeps flying just as before." },
             { "#PSR_Help_TrackedTitle", "Which stages are taken over" },
-            { "#PSR_Help_Tracked", "Every separated, unmanned stage in range around Kerbin that has parachutes or a landing engine with propellant - at most <<1>> at a time. Otherwise the window names the reason." },
+            { "#PSR_Help_Tracked", "Every separated, unmanned stage in range around Kerbin that still has closed parachutes or a landing engine with propellant - at most <<1>> at a time. Otherwise the window names the reason." },
             { "#PSR_Help_ChutesTitle", "Parachutes" },
             { "#PSR_Help_Chutes", "Canopies are armed during the descent; their opening height is set under Settings (<<1>> above ground). KSP decides when they actually open." },
             { "#PSR_Help_PoweredTitle", "Powered landing" },

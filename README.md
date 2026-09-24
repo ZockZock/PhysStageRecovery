@@ -1,8 +1,32 @@
-# PhysStageRecovery 0.9.36 — KSP 1.12.5
+# PhysStageRecovery 0.9.37 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
 **MechJeb muss weder installiert noch als Bauteil am Booster vorhanden sein.** Die benötigten Algorithmen sind im eigenen Plugin enthalten. Erforderlich ist weiterhin Harmony 2 unter `GameData/000_Harmony/0Harmony.dll`.
+
+## 0.9.37: Nur ein noch geschlossener Fallschirm zählt
+
+Beim Übernehmen einer abgetrennten Stufe genügte bisher der bloße **Besitz** eines `ModuleParachute` —
+unabhängig davon, in welchem Zustand er war. Zwei Fälle waren damit falsch:
+
+* Ein Schirm, den KSP bereits **gekappt** (`CUT`) oder der Spieler im Menü **abgeschaltet** hat, ist
+  kein Fallschirm mehr. Eine Stufe, die nur solche hatte, wurde trotzdem verfolgt, obwohl sie nichts
+  mehr besaß, womit sie landen konnte — und der Grund („weder Fallschirme noch ein geeignetes
+  Triebwerk") erschien nicht, weil die Stufe ja übernommen wurde.
+* Ein Schirm, der **schon offen** ist (`SEMIDEPLOYED` oder `DEPLOYED`), schließt die Stufe jetzt
+  **vollständig** aus — auch dann, wenn sie ein lauffähiges Triebwerk und ein Kontrollmodul trägt.
+  Begründung: Diese Kappe ist in einem Sinkflug aufgegangen, den niemand geplant hat; die
+  Schirmautomatik kann sie nicht mehr armen, und der Widerstand, den sie erzeugt, steckt in keinem
+  Plan des Mods. Der Mod lässt die Finger davon und schreibt als Grund
+  **„Fallschirm ist schon offen"** ins Fenster (deutsche und englische Fassung).
+
+Die Regel steht unverändert im Rechenkern `src/TrackingAcceptance.cs` und ist damit prüfbar; sie hat
+jetzt zwei Schirm-Parameter statt einem (`usableChute`, `openChute`) — **12 Prüfungen** in
+`tests/TrackingAcceptanceTests.cs` (statt 9), darunter: ein offener Schirm lehnt die Stufe auch mit
+Triebwerk und Kontrollmodul ab, und ein gekappter Schirm ist kein Landemittel.
+
+Der Anleitungstext im Fenster sagt es ebenfalls: „… die **noch geschlossene** Fallschirme oder ein
+Landetriebwerk mit Treibstoff hat".
 
 ## 0.9.36: „Ziel-Sinken" im Fenster ist jetzt wirklich das Ziel
 

@@ -78,7 +78,7 @@ namespace BoosterWatch
             GameEvents.onCrash.Add(OnCrash);
             GameEvents.onCrashSplashdown.Add(OnCrash);
             AddToolbar();
-            Debug.Log("[PhysStageRecovery] 0.9.36 started; physics range " + settings.PhysicsRange + " m.");
+            Debug.Log("[PhysStageRecovery] 0.9.37 started; physics range " + settings.PhysicsRange + " m.");
         }
 
         private void AddToolbar()
@@ -372,13 +372,23 @@ namespace BoosterWatch
                         skip = Loc.Get("#PSR_Skip_Journal", Loc.Journal(old.Status));
                     else
                     {
-                        bool chutes = v.parts.Any(p => p.FindModulesImplementing<ModuleParachute>().Count > 0);
+                        List<ModuleParachute> canopies = v.parts
+                            .SelectMany(p => p.FindModulesImplementing<ModuleParachute>()).ToList();
+                        // A canopy counts only while it is still closed and switched on: one that is
+                        // already out means an unplanned descent, one that KSP cut or the player
+                        // switched off is no parachute at all.
+                        bool usableChute = canopies.Any(c => c.isEnabled
+                            && (c.deploymentState == ModuleParachute.deploymentStates.STOWED
+                                || c.deploymentState == ModuleParachute.deploymentStates.ACTIVE));
+                        bool openChute = canopies.Any(c => c.deploymentState == ModuleParachute.deploymentStates.SEMIDEPLOYED
+                            || c.deploymentState == ModuleParachute.deploymentStates.DEPLOYED);
                         bool engines = v.parts.Any(p => p.FindModulesImplementing<ModuleEngines>()
                             .Any(PoweredLanding.Suitable));
                         // A control module is what lets KSP's engines answer a throttle at all; see
                         // TrackingAcceptance for why an engine without one is refused.
                         bool control = v.parts.Any(p => p.FindModuleImplementing<ModuleCommand>() != null);
-                        string refusal = TrackingAcceptance.Reason(chutes, settings.PoweredLanding, engines, control);
+                        string refusal = TrackingAcceptance.Reason(usableChute, openChute, settings.PoweredLanding,
+                            engines, control);
                         if (refusal != null) skip = Loc.Get(refusal);
                     }
                 }
