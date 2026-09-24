@@ -1,8 +1,33 @@
-# PhysStageRecovery 0.9.34 — KSP 1.12.5
+# PhysStageRecovery 0.9.35 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
 **MechJeb muss weder installiert noch als Bauteil am Booster vorhanden sein.** Die benötigten Algorithmen sind im eigenen Plugin enthalten. Erforderlich ist weiterhin Harmony 2 unter `GameData/000_Harmony/0Harmony.dll`.
+
+## 0.9.35: Der Vorhalt greift nur um Kerbin
+
+**Der Fehler aus dem Flugtest:** Um den Mun herum eine Stufe abtrennen, die noch Treibstoff hat — der
+Mod hielt sie fest und machte Unsinn. Nachgesehen, wo der Mod ohne Prüfung des Himmelskörpers handelt:
+Das **Verfolgen** prüft `mainBody.isHomeWorld` an allen sieben Stellen (Erfassen,
+Stufentrennung-Weiterverfolgung, Journal, Fallschirmschutz, Bergung, Autostaging, Landegesetz), der
+**Lande-Vorhalt am Triebwerk** dagegen **gar nicht**. Er armt beim ersten Flugtick, hält den Treibstoff
+zurück und meldet Ausbrand — auf jedem Körper. Eine Stufe, deren Treibstoff für das Schiff gebraucht
+wird, war damit um den Mun herum nicht mehr zu gebrauchen.
+
+**Die Regel steht jetzt im Rechenkern**, nicht irgendwo im Modul, und ist damit prüfbar
+(`FuelReserve.Acts`, 7 neue Prüfungen in `tests/FuelReserveTests.cs`):
+
+```csharp
+homeWorld && shuttable && percent > 0 && !released && hasTanks
+```
+
+* Außerhalb der Heimatwelt ist der Vorhalt **vollständig passiv**: kein Halten, keine Freigabe, kein
+  eigener Zustand, keine Logzeile. Die Stufe behält Treibstoff und Triebwerke.
+* Am Triebwerk steht dann statt „aktiv: Rest …" die Zeile **„nur um Kerbin aktiv"**.
+* Die Setup-Logzeile nennt jetzt den Körper: `… Koerper=Mun` — damit ist im Log belegt, wo der Vorhalt
+  gerechnet hat.
+* Der Anleitungstext im Fenster sagt es ebenfalls: „Jede abgetrennte, unbemannte Stufe in Reichweite
+  **um Kerbin** …".
 
 ## 0.9.34: Die Anleitung steht im Fenster
 

@@ -88,6 +88,20 @@ class FuelReserveTests
             "The reserve line names every propellant with the amount that has to stay");
         Check(FuelReserve.TankText(One(0, 0)) == "", "A propellant without a tank is left out of the lines");
 
+        // The reserve belongs to the home world: in a test flight a stage separated around the Mun was
+        // held back although its fuel was meant for the ship. Nothing may hold there, whatever else is
+        // set.
+        Check(FuelReserve.Acts(true, true, 20, false, true), "At the home world an armed reserve acts");
+        Check(!FuelReserve.Acts(false, true, 20, false, true),
+            "Around another body the reserve never acts");
+        Check(!FuelReserve.Acts(false, true, 80, false, true),
+            "Around another body a full reserve setting changes nothing either");
+        Check(!FuelReserve.Acts(true, false, 20, false, true),
+            "An engine that cannot be shut down has no reserve");
+        Check(!FuelReserve.Acts(true, true, 0, false, true), "A reserve of zero percent does nothing");
+        Check(!FuelReserve.Acts(true, true, 20, true, true), "A released reserve does not act again");
+        Check(!FuelReserve.Acts(true, true, 20, false, false), "Without an own tank there is nothing to hold");
+
         Console.WriteLine(checks + " checks passed.");
         return 0;
     }

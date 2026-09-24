@@ -75,6 +75,18 @@ namespace BoosterWatch
             return false;
         }
 
+        // Whether the reserve acts at all right now.
+        //
+        // The home world is part of the rule and not a detail: the reserve keeps fuel for a booster
+        // that comes back to Kerbin. Around another body - or on the way there - it would darken
+        // engines the player still needs for the flight. That is exactly what happened in a test
+        // flight: a stage separated around the Mun was held back although its fuel was meant for the
+        // ship, and the stage could no longer be used.
+        public static bool Acts(bool homeWorld, bool shuttable, double percent, bool released, bool hasTanks)
+        {
+            return homeWorld && shuttable && percent > 0 && !released && hasTanks;
+        }
+
         // How full the own tanks still are, as a share of their capacity. The emptiest propellant
         // decides; NaN means the engine has no tank of its own.
         public static double RemainingShare(IList<FuelStock> stocks)

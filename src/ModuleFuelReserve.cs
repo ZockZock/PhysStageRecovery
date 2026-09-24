@@ -146,7 +146,8 @@ namespace BoosterWatch
                 + " = " + FuelReserve.MassText(FuelReserve.ReserveMass(stocks, reservePercent))
                 + " (ca. " + FuelReserve.SpeedText(FuelReserve.IdealDeltaV(dryMass,
                     FuelReserve.ReserveMass(stocks, reservePercent), isp)) + ")"
-                + (shuttable ? "" : " - Triebwerk nicht abschaltbar"));
+                + (shuttable ? "" : " - Triebwerk nicht abschaltbar")
+                + " Koerper=" + (part.vessel.mainBody == null ? "?" : part.vessel.mainBody.name));
         }
 
         private void OnPercentChanged(BaseField field, object value)
@@ -214,29 +215,37 @@ namespace BoosterWatch
         private void Step()
         {
             Vessel vessel = part.vessel;
-            // The vessel this part started the flight on: on the pad that is the whole rocket, and
-            // when the booster is later separated into a ship of its own, the reserve has done its
-            // job. Taking it from the first flight tick and not from the module's setup keeps a
-            // loaded save honest - the first tick is whatever vessel the part is on then.
-            if (startVessel == null) startVessel = vessel;
-            bool onGround = vessel.LandedOrSplashed;
-            if (!started)
+            // The reserve belongs to the home world. Elsewhere it stays out of the way completely: no
+            // hold, no release, no log. A stage separated around the Mun keeps its fuel and its
+            // engines, which is what the player expects there.
+            bool homeWorld = vessel.mainBody != null && vessel.mainBody.isHomeWorld;
+            if (homeWorld)
             {
-                started = true;
-                // A craft that begins the flight on the ground (pad, runway) arms its reserve again,
-                // so a recovered rocket can be flown a second time. A module that turns up on a vessel
-                // already coming down - an old save, or a slider touched during a descent - is
-                // released instead: that reserve was not set for this flight, and one that snapped
-                // shut on a landing booster would kill the landing.
-                if (onGround) reserveReleased = false;
-                else if (vessel.verticalSpeed < -1) Release("#PSR_Reserve_ReasonDescending");
+                // The vessel this part started the flight on: on the pad that is the whole rocket, and
+                // when the booster is later separated into a ship of its own, the reserve has done its
+                // job. Taking it from the first flight tick and not from the module's setup keeps a
+                // loaded save honest - the first tick is whatever vessel the part is on then.
+                if (startVessel == null) startVessel = vessel;
+                bool onGround = vessel.LandedOrSplashed;
+                if (!started)
+                {
+                    started = true;
+                    // A craft that begins the flight on the ground (pad, runway) arms its reserve again,
+                    // so a recovered rocket can be flown a second time. A module that turns up on a vessel
+                    // already coming down - an old save, or a slider touched during a descent - is
+                    // released instead: that reserve was not set for this flight, and one that snapped
+                    // shut on a landing booster would kill the landing.
+                    if (onGround) reserveReleased = false;
+                    else if (vessel.verticalSpeed < -1) Release("#PSR_Reserve_ReasonDescending");
+                }
+                if (!onGround) flew = true;
+                if (startVessel != vessel) Release("#PSR_Reserve_ReasonSeparation");
+                else if (flew && onGround) Release("#PSR_Reserve_ReasonGround");
             }
-            if (!onGround) flew = true;
-            if (startVessel != vessel) Release("#PSR_Reserve_ReasonSeparation");
-            else if (flew && onGround) Release("#PSR_Reserve_ReasonGround");
 
             ReadAmounts();
-            bool canHold = shuttable && reservePercent > 0 && !reserveReleased && FuelReserve.HasTanks(stocks);
+            bool canHold = FuelReserve.Acts(homeWorld, shuttable, reservePercent, reserveReleased,
+                FuelReserve.HasTanks(stocks));
             if (canHold && FuelReserve.Reached(stocks, reservePercent)) Hold();
             else if (locked) { LetGo("Vorhalt nicht mehr erreicht"); textDirty = true; }
 
@@ -620,7 +629,11 @@ namespace BoosterWatch
             }
             Events["ReleaseReserve"].guiActive = !reserveReleased;
             string share = FuelReserve.ShareText(FuelReserve.RemainingShare(stocks));
-            if (reserveReleased)
+            // Outside the home world the reserve does nothing at all, so the menu says that instead of
+            // claiming to be active.
+            if (part.vessel != null && part.vessel.mainBody != null && !part.vessel.mainBody.isHomeWorld)
+                reserveStatus = Loc.Get("#PSR_Reserve_OnlyHome");
+            else if (reserveReleased)
                 reserveStatus = Loc.Get("#PSR_Reserve_Released", releaseReason, share);
             else if (!shuttable) reserveStatus = Loc.Get("#PSR_Reserve_NoShutdownNoReserve");
             else if (!FuelReserve.HasTanks(stocks)) reserveStatus = Loc.Get("#PSR_Reserve_NoTankNoReserve");

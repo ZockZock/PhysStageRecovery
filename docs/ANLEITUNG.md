@@ -28,8 +28,8 @@ also nicht widersprechen.
 
 ### 2 · Welche Stufen übernommen werden
 
-> Jede abgetrennte, unbemannte Stufe in Reichweite, die Fallschirme oder ein Landetriebwerk mit
-> Treibstoff hat — höchstens <<1>> gleichzeitig. Sonst nennt das Fenster den Grund.
+> Jede abgetrennte, unbemannte Stufe in Reichweite um Kerbin, die Fallschirme oder ein Landetriebwerk
+> mit Treibstoff hat — höchstens <<1>> gleichzeitig. Sonst nennt das Fenster den Grund.
 
 ### 4 · Fallschirme
 
