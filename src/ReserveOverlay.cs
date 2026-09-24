@@ -12,11 +12,14 @@ namespace BoosterWatch
     //
     // The stock element is public API, so almost nothing has to be reflected: StageManager.Instance.Stages
     // holds one StageGroup per stage, its field inverseStageIndex is the stage number, and its field
-    // DeltaVHeadingImage is the box that carries the gauge (UnityEngine.UI.Image). Inside that box the
-    // bar is the widest Image/RawImage child; a label is a graphic too (TextMeshPro) but never the bar.
-    // The overlay is a RawImage parented to the bar with its left edge on the bar's left edge and a
-    // width of reserve share x bar width - so position, size, UI scale and resolution follow the stock
-    // bar on their own, and the stripes are drawn on top of it because a child draws after its parent.
+    // DeltaVHeadingImage is the gauge. In this KSP that gauge is the box itself (the only other child is
+    // the label text, see the log line), and it is a filled UnityEngine.UI.Image.
+    //
+    // Where the hatch goes is read from the fill, not guessed: the reserve is the fuel that is burned
+    // LAST, so it sits at the end of the gauge the fuel drains towards - at the left for a bar filled
+    // from the left, at the right for one anchored at the right (fillOrigin), inset by the sprite's
+    // border, which is the space the label occupies. The overlay is a RawImage parented to the gauge,
+    // first child so the label is drawn over it, and it is clipped to the part that is still filled.
     public sealed partial class BoosterWatchFlight
     {
         private const string OverlayName = "PhysStageRecoveryReserve";
@@ -61,49 +64,72 @@ namespace BoosterWatch
                 DetachReserveOverlay();
                 return;
             }
-            float inset;
-            RectTransform area = BarArea(box.rectTransform, out inset);
-            if (area == null)
-            {
-                area = box.rectTransform;
-                inset = 0f;
-            }
-            if (reserveOverlay == null || overlayHost != area) AttachReserveOverlay(box, area, inset, reserve);
+            float labelWidth;
+            RectTransform area = BarArea(box.rectTransform, out labelWidth);
+            if (area == null) area = box.rectTransform;
+            if (reserveOverlay == null || overlayHost != area) AttachReserveOverlay(box, area, reserve);
             if (reserveOverlay == null) return;
-            float span = Mathf.Max(0f, area.rect.width - inset);
-            float width = Mathf.Max(0f, span * (float)reserve.Reserve);
-            RectTransform rect = reserveOverlay.rectTransform;
-            rect.anchoredPosition = new Vector2(inset, 0f);
-            rect.sizeDelta = new Vector2(width, 0f);
-            reserveOverlay.uvRect = new Rect(0f, 0f, Mathf.Max(1f, width) / 8f,
-                Mathf.Max(1f, area.rect.height) / 8f);
+            PlaceReserveOverlay(reserveOverlay, area, (float)reserve.Reserve, labelWidth);
         }
 
         // The bar inside the heading box: the widest Image or RawImage child. A text is a graphic as
-        // well, so it is measured separately - if there is no bar child at all, the box itself is the
-        // bar and the hatch starts behind the label.
-        private RectTransform BarArea(RectTransform box, out float inset)
+        // well, so it is measured separately; when there is no bar child (this KSP), the box itself is
+        // the bar and the label width is the inset the visible fill starts behind.
+        private RectTransform BarArea(RectTransform box, out float labelWidth)
         {
-            inset = 0f;
+            labelWidth = 0f;
             RectTransform best = null;
-            float bestWidth = 0, labelWidth = 0;
+            float bestWidth = 0;
             for (int i = 0; i < box.childCount; i++)
             {
                 RectTransform child = box.GetChild(i) as RectTransform;
                 if (child == null || child.name == OverlayName) continue;
                 Graphic graphic = child.GetComponent<Graphic>();
                 if (graphic == null) continue;
-                bool bar = graphic is Image || graphic is RawImage;
                 float width = child.rect.width;
-                if (!bar) { labelWidth = Mathf.Max(labelWidth, width); continue; }
+                if (!(graphic is Image) && !(graphic is RawImage))
+                {
+                    // A label: its rect is the whole box, so it is only useful as a fallback inset when
+                    // it does not span the box (then it really is the label column).
+                    if (width < box.rect.width * 0.95f) labelWidth = Mathf.Max(labelWidth, width);
+                    continue;
+                }
                 if (width <= bestWidth) continue;
                 bestWidth = width;
                 best = child;
             }
-            if (best != null) return best;
-            // No bar child: the box itself is the bar, and the hatch starts behind the label.
-            if (labelWidth > 0 && labelWidth < box.rect.width) inset = labelWidth;
-            return null;
+            return best;
+        }
+
+        // The hatch. "reserve" is the share of the tank that has to stay; the stock gauge shows what is
+        // left, so the hatch marks the end of the fill the fuel drains towards and is clipped to the
+        // filled part: once the fuel is down to the reserve, the whole filled bar is hatched.
+        private static void PlaceReserveOverlay(RawImage overlay, RectTransform bar, float reserve, float labelWidth)
+        {
+            Image image = bar.GetComponent<Image>();
+            float width = bar.rect.width;
+            float left = labelWidth, right = 0f;
+            if (image != null && image.sprite != null)
+            {
+                float ppu = image.sprite.pixelsPerUnit <= 0f ? 100f : image.sprite.pixelsPerUnit;
+                Vector4 border = image.sprite.border;
+                if (border.x > 0f && border.x / ppu < width * 0.5f) left = Mathf.Max(left, border.x / ppu);
+                if (border.z > 0f && border.z / ppu < width * 0.5f) right = border.z / ppu;
+            }
+            float usable = Mathf.Max(0f, width - left - right);
+            float level = FillAmount(bar);
+            float share = Mathf.Clamp01(reserve);
+            if (!float.IsNaN(level)) share = Mathf.Min(share, Mathf.Clamp01(level));
+            float hatch = usable * share;
+            bool fromRight = image != null && image.type == Image.Type.Filled
+                && image.fillMethod == Image.FillMethod.Horizontal && image.fillOrigin == 1;
+            RectTransform rect = overlay.rectTransform;
+            rect.anchorMin = new Vector2(0f, 0f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.anchoredPosition = new Vector2(fromRight ? width - right - hatch : left, 0f);
+            rect.sizeDelta = new Vector2(hatch, 0f);
+            overlay.uvRect = new Rect(0f, 0f, Mathf.Max(1f, hatch) / 8f, Mathf.Max(1f, bar.rect.height) / 8f);
         }
 
         // The gauge of the stage the vessel is on right now. The staging list belongs to the active
@@ -123,11 +149,12 @@ namespace BoosterWatch
                 Image box = HeadingImage(group);
                 if (box == null) { ReportGauge(false, "Box am Stufenfeld " + vessel.currentStage + " nicht gefunden"); return null; }
                 if (!box.gameObject.activeInHierarchy) { ReportGauge(false, "Box am Stufenfeld " + vessel.currentStage + " ist ausgeblendet"); return null; }
-                float inset;
-                RectTransform area = BarArea(box.rectTransform, out inset);
+                float labelWidth;
+                RectTransform area = BarArea(box.rectTransform, out labelWidth);
                 ReportGauge(true, "Stufe " + vessel.currentStage + " Box=" + Size(box.rectTransform)
-                    + " Balken=" + (area == null ? "Box selbst" : "'" + area.name + "' " + Size(area) + " " + GraphicType(area))
-                    + (area == null && inset > 0 ? " (Kuerzel " + inset.ToString("0") + " px)" : "")
+                    + " " + GraphicType(box.rectTransform)
+                    + " Balken=" + (area == null ? "Box selbst (Kuerzel " + labelWidth.ToString("0") + ")"
+                        : "'" + area.name + "' " + Size(area) + " " + GraphicType(area))
                     + " Kinder: " + Children(box.rectTransform));
                 return box;
             }
@@ -149,7 +176,7 @@ namespace BoosterWatch
         }
 
         // StageGroup.DeltaVHeadingImage is private, so it is read by name once and then cached. If a
-        // future KSP renames it, the log says so and the own field stays the display.
+        // future KSP renames it, the log says so and there is nothing to draw on.
         private static Image HeadingImage(StageGroup group)
         {
             if (!gaugeFieldSearched)
@@ -159,7 +186,7 @@ namespace BoosterWatch
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (gaugeField == null)
                     Debug.LogError("[PhysStageRecovery] Lande-Vorhalt: StageGroup.DeltaVHeadingImage gibt es nicht mehr; "
-                        + "die Anzeige bleibt im eigenen Feld.");
+                        + "die Schraffur bleibt aus, der Vorhalt wirkt weiter.");
             }
             if (gaugeField == null || group == null) return null;
             try { return gaugeField.GetValue(group) as Image; } catch { return null; }
@@ -178,11 +205,19 @@ namespace BoosterWatch
             return area.rect.width.ToString("0") + "x" + area.rect.height.ToString("0");
         }
 
+        // Everything about the stock graphic that decides where the hatch goes: the fill direction, the
+        // level it currently shows and the sprite border the visible fill starts behind.
         private static string GraphicType(RectTransform area)
         {
             if (area == null) return "-";
             Image image = area.GetComponent<Image>();
-            if (image != null) return image.type + "/fill=" + FillAmount(area).ToString("0.00");
+            if (image != null)
+            {
+                string sprite = image.sprite == null ? "ohne Sprite" : image.sprite.name
+                    + " border=" + image.sprite.border.ToString("0");
+                return image.type + "/" + image.fillMethod + "/Origin" + image.fillOrigin
+                    + " fill=" + FillAmount(area).ToString("0.00") + " " + sprite;
+            }
             RawImage raw = area.GetComponent<RawImage>();
             if (raw != null) return "RawImage";
             Graphic graphic = area.GetComponent<Graphic>();
@@ -196,10 +231,10 @@ namespace BoosterWatch
             gaugeNote = note;
             if (found) Debug.Log("[PhysStageRecovery] Lande-Vorhalt auf der Stock-Tankanzeige: " + note);
             else Debug.LogWarning("[PhysStageRecovery] Lande-Vorhalt: Stock-Tankanzeige nicht nutzbar - " + note
-                + ". Der Vorhalt bleibt im Triebwerksmenue ablesbar.");
+                + ". Der Vorhalt wirkt weiter, nur die Schraffur fehlt.");
         }
 
-        private void AttachReserveOverlay(Image box, RectTransform area, float inset, ReserveStatus reserve)
+        private void AttachReserveOverlay(Image box, RectTransform area, ReserveStatus reserve)
         {
             DetachReserveOverlay();
             try
@@ -212,20 +247,14 @@ namespace BoosterWatch
                 reserveOverlay.raycastTarget = false;
                 RectTransform rect = reserveOverlay.rectTransform;
                 rect.SetParent(area, false);
-                // Left edge on the bar's left edge (plus the label, where the box itself is the bar),
-                // height following the bar, so everything about the stock layout is inherited instead
-                // of recomputed.
-                rect.anchorMin = new Vector2(0f, 0f);
-                rect.anchorMax = new Vector2(0f, 1f);
-                rect.pivot = new Vector2(0f, 0.5f);
-                rect.anchoredPosition = new Vector2(inset, 0f);
+                // First child: the gauge draws its own fill first, then the hatch, then the label - so
+                // the hatch never covers the label glyphs.
+                rect.SetAsFirstSibling();
                 rect.localScale = Vector3.one;
-                rect.sizeDelta = new Vector2(0f, 0f);
                 gaugeBox = box;
                 overlayHost = area;
                 Debug.Log("[PhysStageRecovery] Lande-Vorhalt: Schraffur an '" + area.name + "' eingehaengt ("
-                    + FuelReserve.PercentText(100 * reserve.Reserve) + " von " + Size(area)
-                    + (inset > 0 ? ", Kuerzel " + inset.ToString("0") : "") + ", Rest "
+                    + FuelReserve.PercentText(100 * reserve.Reserve) + " von " + Size(area) + ", Rest "
                     + FuelReserve.ShareText(reserve.Remaining)
                     + (reserve.Engine.Length > 0 ? ", " + reserve.Engine : "") + ").");
             }

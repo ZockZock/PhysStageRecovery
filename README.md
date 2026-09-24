@@ -1,4 +1,4 @@
-# PhysStageRecovery 0.9.27 — KSP 1.12.5
+# PhysStageRecovery 0.9.28 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
@@ -35,6 +35,33 @@ Beim Start steht die Kontrolle in `KSP.log`:
 Steht dort weniger, fehlt an einem Teil der Regler — das Log meldet es dann als Fehler, und ein dort
 gesetzter Vorhalt überlebt Werkstatt und Rampe nicht. Triebwerke ohne Abschaltung (Feststoffbooster)
 bekommen den Regler weiterhin nicht zu sehen.
+
+## 0.9.28: Die Schraffur sitzt am richtigen Ende des Balkens
+
+Die Kinderliste aus dem Log hat es geklärt: Der Balken ist die Box **selbst** — ihr einziges Kind ist
+der Text (`DeltaVText`), es gibt also keinen Balken *in* der Box. Und der grüne Füllstand ist
+**rechts verankert**: das Kürzel `FT` steht über dem *leeren* Teil der Anzeige. Die Reserve ist der
+Treibstoff, der zuletzt verbrannt wird — bei einer rechts verankerten Anzeige liegt der **rechts**.
+Genau dort steht die Schraffur jetzt; vorher lag sie am linken Ende über dem Kürzel.
+
+Statt einer Annahme liest der Mod die Füllrichtung aus dem Stock-Bild:
+
+```csharp
+Image.Type.Filled && fillMethod == Image.FillMethod.Horizontal && fillOrigin == 1   // rechts verankert
+```
+
+Daraus und aus dem Sprite-Rand (der Platz, den das Kürzel einnimmt) ergeben sich Anfang und Breite der
+Schraffur. Sie wird außerdem auf den **noch gefüllten** Teil begrenzt: steht der Tank auf seinem
+Vorhalt, ist der ganze gefüllte Balken schraffiert, und die Anzeige sagt damit „du lebst jetzt von der
+Reserve". Das Overlay ist das *erste* Kind der Anzeige, damit das Kürzel darüber gezeichnet wird und
+lesbar bleibt.
+
+Die Diagnosezeile nennt jetzt Füllart, Füllrichtung, Füllstand, Sprite und Rand:
+
+```
+[PhysStageRecovery] Lande-Vorhalt auf der Stock-Tankanzeige: Stufe 2 Box=50x16 Filled/Horizontal/Origin1 fill=0.62
+    DeltaV border=0/0/0/0 Kinder: DeltaVText(TextMeshProUGUI 50x20)
+```
 
 ## 0.9.27: Die Schraffur hängt wirklich — zwei Fehler aus dem Log
 
