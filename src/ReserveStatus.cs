@@ -18,12 +18,14 @@ namespace BoosterWatch
         public bool Armed;
         public string Engine = "";
         public int Engines;
+        // The part whose engine carries the reserve: its staging icon is where the box belongs.
+        public Part Part;
 
         public void Update(Vessel vessel)
         {
             Configured = false; Armed = false;
             Reserve = double.NaN; Remaining = double.NaN;
-            Engine = ""; Engines = 0;
+            Engine = ""; Engines = 0; Part = null;
             if (vessel == null || vessel.parts == null) return;
             double best = 0;
             bool released = false;
@@ -44,6 +46,7 @@ namespace BoosterWatch
                     Reserve = percent / 100;
                     Remaining = module.OwnTankShare;
                     Engine = module.EngineTitle;
+                    Part = module.part;
                 }
             }
             Configured = Engines > 0 && !double.IsNaN(Reserve);

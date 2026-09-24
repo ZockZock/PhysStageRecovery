@@ -1,4 +1,4 @@
-# PhysStageRecovery 0.9.28 — KSP 1.12.5
+# PhysStageRecovery 0.9.29 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
@@ -35,6 +35,39 @@ Beim Start steht die Kontrolle in `KSP.log`:
 Steht dort weniger, fehlt an einem Teil der Regler — das Log meldet es dann als Fehler, und ein dort
 gesetzter Vorhalt überlebt Werkstatt und Rampe nicht. Triebwerke ohne Abschaltung (Feststoffbooster)
 bekommen den Regler weiterhin nicht zu sehen.
+
+## 0.9.29: Die Anzeige ist ein Stock-Infokästchen — recherchiert statt probiert
+
+Das `FT`-Kästchen in der Stufenliste ist ein **`KSP.UI.Screens.StageIconInfoBox`**, und KSP bietet es
+als öffentliche API an. Damit braucht es kein Overlay, keine Koordinatenrechnung, keine
+Füllrichtungs-Raterei und keine Reflection:
+
+| API | Zweck |
+|---|---|
+| `StageManager.Instance.Stages` → `StageGroup.Icons` | die Stufen-Icons; `StageIcon.Part` sagt, welches Bauteil |
+| `StageIcon.DisplayInfo()` | erzeugt ein Infokästchen am Icon (`StageIconInfoBox`) |
+| `box.SetCaption(...)`, `box.SetMessage(...)` | die beiden Textzeilen |
+| `box.SetValue(value, min, max)` | der Fortschrittsbalken |
+| `box.SetProgressBarColor(...)`, `box.SetProgressBarBgColor(...)` | Füll- und Spurfarbe |
+| `StageIcon.RemoveInfo(box)` | Kästchen zurückgeben |
+
+Quellen: [StageIcon](https://kspmoddinglibs.github.io/KSPDocsSite/class_k_s_p_1_1_u_i_1_1_screens_1_1_stage_icon.html)
+— `DisplayInfo()`: *„Create a new Information Box by the side of the icon"*, `maxInfoBoxes = 3` — und
+[StageIconInfoBox](https://kspmoddinglibs.github.io/KSPDocsSite/class_k_s_p_1_1_u_i_1_1_screens_1_1_stage_icon_info_box.html).
+Dieselbe Doku bestätigt, dass die Box, an der ich mich vorher versucht hatte, die **Delta-v-Anzeige**
+ist (`SetDeltaVHeading_OnUpdate`: *„updates the Dv HEading in flight"*) — deshalb war sie die falsche.
+
+Das Kästchen sitzt am **Icon des Triebwerks**, das den Vorhalt trägt (nicht an der laufenden Stufe),
+und wird gegen den Vorhalt selbst gelesen:
+
+* Beschriftung `Vorhalt 25 %`, Meldung `Rest 41.2 %`
+* `SetValue(Rest, Vorhalt, 1)`: der Balken ist **genau dann leer, wenn der Tank auf dem Vorhalt steht**
+* Die Farbe wechselt auf Orange, sobald der Tank den Vorhalt erreicht hat — die Anzeige sagt damit
+  „ab hier lebt die Landung von der Reserve"
+
+Das Kästchen entsteht und verschwindet mit seinem Stufen-Icon (also auch beim Stagen); der Mod legt es
+neu an, sobald es weg ist. Sind die drei Plätze (`maxInfoBoxes`) belegt, sagt das Log es, und der
+Vorhalt wirkt unverändert weiter.
 
 ## 0.9.28: Die Schraffur sitzt am richtigen Ende des Balkens
 
