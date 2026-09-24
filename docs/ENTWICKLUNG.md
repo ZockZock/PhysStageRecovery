@@ -47,6 +47,7 @@ Beim Start steht die Kontrolle in `KSP.log`:
 | `v0.9.17` | Anflug mit Sinkratenleiter, seitliche Auffanggrenze 0,5 m/s | `docs/BASELINE-0.9.17.md` |
 | `v0.9.20` | Volllastbremsung bis zur Auffanghöhe, schubachsenbewusste Vorhersage, späte Zündung | `docs/BASELINE-0.9.20.md` |
 | `v0.9.31` | Lande-Vorhalt am Triebwerk (Bauteilmodul, MechJeb trennt darauf), Anzeige schraffiert in der Stock-FT-Box | `docs/BASELINE-0.9.31.md` |
+| `v0.9.32` | Oberfläche folgt der Sprache von KSP (125 Tags, en-us + de-de, englischer Text zusätzlich in der DLL) | `docs/BASELINE-0.9.32.md` |
 
 ```powershell
 git log --oneline --decorate          # Historie mit Tags
