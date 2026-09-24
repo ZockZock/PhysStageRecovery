@@ -13,6 +13,13 @@ $descentExe = Join-Path $testDir 'DescentGateTests.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Descent test compilation failed.' }
 & $descentExe
 if ($LASTEXITCODE -ne 0) { throw 'Descent gate tests failed.' }
+# The landing reserve is arithmetic only: which share of an engine's own tanks holds it back, what
+# that share is worth and the text the menu shows. No KSP, no Unity.
+$reserveExe = Join-Path $testDir 'FuelReserveTests.exe'
+& $compiler /nologo /target:exe ('/out:' + $reserveExe) (Join-Path $PSScriptRoot 'src\FuelReserve.cs') (Join-Path $PSScriptRoot 'tests\FuelReserveTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Reserve test compilation failed.' }
+& $reserveExe
+if ($LASTEXITCODE -ne 0) { throw 'Landing reserve tests failed.' }
 $harmony = Join-Path $KspDir 'GameData\000_Harmony\0Harmony.dll'
 $guardExe = Join-Path $testDir 'ParachuteGuardTests.exe'
 Copy-Item -LiteralPath $harmony -Destination (Join-Path $testDir '0Harmony.dll') -Force

@@ -1,8 +1,61 @@
-# PhysStageRecovery 0.9.20 — KSP 1.12.5
+# PhysStageRecovery 0.9.21 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
 **MechJeb muss weder installiert noch als Bauteil am Booster vorhanden sein.** Die benötigten Algorithmen sind im eigenen Plugin enthalten. Erforderlich ist weiterhin Harmony 2 unter `GameData/000_Harmony/0Harmony.dll`.
+
+## 0.9.21: Lande-Vorhalt am Triebwerk
+
+Der Mod rechnete bisher erst ab dem Abkoppeln. Was davor passiert, entscheidet aber, ob es überhaupt
+etwas zu landen gibt: Wer mit MechJeb fliegt, dessen Autostage trennt die Stufe erst, wenn MechJeb sie
+für ausgebrannt hält — ein Booster, der beim Aufstieg bis auf den letzten Tropfen leergesaugt wird,
+kann danach nicht mehr bremsen. Ab jetzt lässt sich am Triebwerk einstellen, wie viel Treibstoff für
+die Landung zurückgehalten wird.
+
+**Rechte Maustaste auf das Triebwerk** (in der Fahrzeugfabrik und im Flug) → **`Lande-Vorhalt (%)`**.
+Der Regler geht von 0 bis 80 % und bezieht sich **nur auf die Tanks, die direkt am Triebwerk hängen**:
+
+* Gerechnet wird über den Zweig des Bauteilbaums, in dem das Triebwerk sitzt, bis zum ersten
+  **Trenner, Dockingport oder Bauteil, das keinen Treibstoff durchlässt** (`fuelCrossFeed`). Ein
+  Abwurftank hinter einem radialen Trenner und ein Tank, der nur über eine **Treibstoffleitung**
+  angebunden ist, zählen nicht mit: eine Leitung ist keine Baumverbindung, ein Trenner trennt sie.
+* Das Menü nennt daneben, was der Vorhalt gerade bedeutet: `25 % = 0.62 t aus 2 Tanks, ca. 210 m/s`.
+  Die **Tankzahl ist die Kontrolle** — stehen dort weniger Tanks als erwartet, sind die Zusatztanks
+  wirklich draußen. Der Wert in m/s ist die ideale Delta-v der Reserve aus Trockenmasse und Isp des
+  Zweigs; Schwerkraft- und Luftverluste des echten Bremsflugs sind darin nicht enthalten.
+* Erreicht der Tankinhalt den Vorhalt, **schaltet der Mod das Triebwerk ab und meldet es als
+  ausgebrannt**. KSP lässt sich dabei nicht belügen: ein gefälschtes `flameout` wird im selben Tick von
+  `ModuleEngines.RequestPropellant` → `UnFlameout` wieder gelöscht. Ein **abgeschaltetes** Triebwerk
+  (`EngineIgnited = false`) verbraucht dagegen nichts, und KSP lässt seine Kennzeichen in Ruhe.
+* **MechJeb trennt daraufhin von selbst.** In `MechJebModuleStagingController` (2.15.3, in der
+  installierten `MechJeb2.dll` nachgeprüft) lautet die Frage „hat die laufende Stufe noch Treibstoff?"
+  wörtlich `!flameout && !engineShutdown` — die Tanks werden dafür **gar nicht** abgefragt. Hat kein
+  Triebwerk der laufenden Stufe mehr „Treibstoff", feuert MechJeb die nächste Stufe. Der Mod greift
+  **nie** in die Stufung der aktiven Rakete ein; ohne MechJeb trennt die Leertaste wie gewohnt.
+* **Triebwerke an denselben Tanks werden mit abgeschaltet.** Sonst saugt der Nachbar den Vorhalt leer,
+  und MechJeb sieht weiter Treibstoff in der Stufe. Deshalb genügt es, den Regler an **einem**
+  Triebwerk eines Clusters zu setzen.
+* **Freigegeben** wird der Vorhalt genau einmal, danach steht der Treibstoff der Landung zur Verfügung:
+  bei der **Stufentrennung** (das Bauteil landet in einem anderen Schiff), beim **Aufsetzen**, oder von
+  Hand über `Vorhalt freigeben`. Die Statuszeile sagt, was gilt: `aktiv: Rest 41.2 % (Grenze 25 %)`,
+  `VORHALT ERREICHT: 1 Triebwerk(e) aus, Rest 24.8 %` oder `freigegeben (Stufentrennung), Rest 24.8 %`.
+* Der Vorhalt wird **mit dem Schiff und mit dem Spielstand gespeichert**. Ein Spielstand aus dem
+  Sinkflug heraus lässt ihn also nicht wieder zuschnappen; eine Rakete, die noch auf dem Boden steht,
+  startet dagegen mit scharfem Vorhalt in einen neuen Flug.
+* Der Regler wird von diesem Plugin an die Triebwerksteile gehängt (`Part.AddModule` — dieselbe API,
+  die KSP für den Düsenrucksack des Kerbal benutzt): in der Werkstatt, sobald ein Triebwerksteil
+  erscheint, und im Flug für alle geladenen Schiffe. Dafür ist **kein ModuleManager nötig**. Nur
+  Triebwerke, die sich abschalten lassen (`allowShutdown`), bekommen den Regler — ein Feststoffbooster
+  ohne Abschaltung kann keinen Vorhalt halten.
+
+**Geprüft ohne Spiel** (`tests/FuelReserveTests.cs`, 37 Prüfungen): die Grenze ist inklusiv (genau auf
+dem Vorhalt wird gehalten), der leerste Treibstoff entscheidet (LF/Ox unsymmetrisch), ein Triebwerk
+ohne eigenen Tank hat keinen Vorhalt, die 80-%-Grenze greift, Masse und ideale Delta-v stimmen
+(10 t trocken + 2 t bei Isp 300 → 536 m/s; dieselben 2 t auf 20 t → 280 m/s) und die Textzeilen des
+Menüs passen.
+
+**Noch offen:** Der Vorhalt gilt für den Aufstieg. Ein Schiff, das ohne Abtrennung selbst landen soll,
+braucht den Knopf `Vorhalt freigeben` — die automatische Freigabe hängt an der Stufentrennung.
 
 ## 0.9.7: Flugschreiber — ein Flug, alle Zahlen
 
