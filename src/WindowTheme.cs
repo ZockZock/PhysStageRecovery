@@ -14,9 +14,6 @@ namespace BoosterWatch
         public readonly Color Secondary = new Color(0.58f, 0.65f, 0.73f);
         public GUIStyle Window, Panel, Inset, Title, Heading, Body, Muted, Small, Value, CompactValue, Button, ActiveButton, Field, Tab, ActiveTab, Badge;
         public GUIStyle FuelTrack, FuelFill, FuelLow;
-        // The reserved part of the stock fuel gauge is drawn as diagonal stripes, tiled from this small
-        // texture (a RawImage with a uvRect), so the stripes stay the same width on any bar.
-        public Texture2D ReserveStripe;
         public WindowTheme()
         {
             try { font = Font.CreateDynamicFontFromOSFont("Segoe UI", 14); } catch { font = null; }
@@ -26,7 +23,6 @@ namespace BoosterWatch
             FuelTrack = Surface(new Color(0.035f, 0.051f, 0.078f), 3);
             FuelFill = Surface(Accent, 3);
             FuelLow = Surface(new Color(0.96f, 0.68f, 0.31f), 3);
-            ReserveStripe = Striped(new Color(0.40f, 0.89f, 0.76f, 0.85f), new Color(0.05f, 0.12f, 0.13f, 0.85f));
             Title = Label(20, Text, FontStyle.Bold);
             Heading = Label(16, Text, FontStyle.Bold);
             Body = Label(14, Text); Body.wordWrap = true;
@@ -85,18 +81,6 @@ namespace BoosterWatch
                 if (dx > 0 && dy > 0) c.a *= Mathf.Clamp01(radius - Mathf.Sqrt(dx * dx + dy * dy) + 0.5f);
                 texture.SetPixel(x, y, c);
             }
-            texture.Apply(); textures.Add(texture); return texture;
-        }
-        // A small repeating tile of diagonal stripes: the reserved share of a fuel bar. Tiled with
-        // GUI.DrawTextureWithTexCoords so the stripes stay the same width whatever the bar is.
-        private Texture2D Striped(Color stripe, Color background)
-        {
-            const int size = 8;
-            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
-            texture.name = "PhysStageRecovery.UI.Reserve"; texture.hideFlags = HideFlags.HideAndDontSave;
-            texture.wrapMode = TextureWrapMode.Repeat; texture.filterMode = FilterMode.Point;
-            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
-                texture.SetPixel(x, y, (x + y) % size < 3 ? stripe : background);
             texture.Apply(); textures.Add(texture); return texture;
         }
         public void Dispose()

@@ -1,4 +1,4 @@
-# PhysStageRecovery 0.9.26 — KSP 1.12.5
+# PhysStageRecovery 0.9.27 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
@@ -35,6 +35,33 @@ Beim Start steht die Kontrolle in `KSP.log`:
 Steht dort weniger, fehlt an einem Teil der Regler — das Log meldet es dann als Fehler, und ein dort
 gesetzter Vorhalt überlebt Werkstatt und Rampe nicht. Triebwerke ohne Abschaltung (Feststoffbooster)
 bekommen den Regler weiterhin nicht zu sehen.
+
+## 0.9.27: Die Schraffur hängt wirklich — zwei Fehler aus dem Log
+
+Der Log hat beide Fehler genannt, keiner davon war zu raten:
+
+```
+[PhysStageRecovery] Lande-Vorhalt: Overlay konnte nicht eingehaengt werden:
+    System.ArgumentException: You can only call GUI functions from inside OnGUI.
+[PhysStageRecovery] Lande-Vorhalt auf der Stock-Tankanzeige:
+    Stufe 2 Box=50x16 Flaeche='DeltaVText' 50x20 Typ=keine Grafik fill=NaN
+```
+
+1. **GUI nur in `OnGUI`.** Das Overlay wurde aus dem Physik-Takt eingehängt und rief dort
+   `EnsureWindowTheme()`; der Theme-Konstruktor benutzt `GUI.skin` und wirft außerhalb von `OnGUI`.
+   Die Streifentextur wird deshalb jetzt vom Overlay selbst gebaut (`StripeTexture()`), ohne Theme und
+   ohne GUI-Aufruf — das Theme ist wieder genau das von vor 0.9.22.
+2. **Ein Kürzel ist auch eine Grafik.** Die Balkensuche nahm „die breiteste Grafik" und erwischte
+   `DeltaVText` — TextMeshPro ist ein `Graphic`, nur eben kein Balken. Gesucht wird jetzt gezielt nach
+   `Image`/`RawImage`; ein Text wird nur noch als Kürzelbreite gemessen, falls die Box selbst der
+   Balken ist (dann beginnt die Schraffur hinter dem Kürzel).
+
+Die Diagnosezeile nennt jetzt zusätzlich alle Kinder der Box mit Typ und Größe, damit der nächste
+Fundfall sofort erklärt ist:
+
+```
+[PhysStageRecovery] Lande-Vorhalt auf der Stock-Tankanzeige: Stufe 2 Box=50x16 Balken='Image' 46x8 Image/fill=0.62 Kinder: DeltaVText(TextMeshProUGUI 50x20), Image(Image 46x8)
+```
 
 ## 0.9.26: Das eigene Feld ist wieder weg
 

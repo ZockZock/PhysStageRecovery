@@ -75,7 +75,7 @@ namespace BoosterWatch
             GameEvents.onCrash.Add(OnCrash);
             GameEvents.onCrashSplashdown.Add(OnCrash);
             AddToolbar();
-            Debug.Log("[PhysStageRecovery] 0.9.26 started; physics range " + settings.PhysicsRange + " m.");
+            Debug.Log("[PhysStageRecovery] 0.9.27 started; physics range " + settings.PhysicsRange + " m.");
         }
 
         private void AddToolbar()
