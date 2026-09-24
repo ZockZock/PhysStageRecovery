@@ -1,11 +1,17 @@
 # Anleitungstext im Hauptfenster
 
-**Status: Textentwurf — noch nicht eingebaut.** Der Text steht im Fenster, solange **kein Booster
-erfasst** ist, an der Stelle der jetzigen zwei Zeilen. Ausgewählt sind die Punkte 1, 2, 4, 5, 6, 8, 9
-und 10; jeder auf das Wesentliche gekürzt und **ohne jeden Bezug auf MechJeb**.
+**Eingebaut in 0.9.34** — der Text steht im Fenster, solange **kein Booster erfasst** ist, an der
+Stelle der früheren zwei Zeilen. Ausgewählt sind die Punkte 1, 2, 4, 5, 6, 8, 9 und 10; jeder auf das
+Wesentliche gekürzt und **ohne jeden Bezug auf MechJeb**.
 
 Nicht enthalten (bewusst): die Flugübersicht (die Zahlen stehen ohnehin darunter), der Lande-Vorhalt,
 die Diagnosewege und die Einstellungsdatei.
+
+**Im Fenster** (`FlightWindow.DrawGuide`): Überschrift, darunter die eine Zeile, die den Zustand
+erklärt (Fehler, „Nicht erfasst: …", oder die Rakete, deren Abtrennungen beobachtet werden), darunter
+die acht Absätze in einem **Scrollbereich** — mit dem Mausrad zu scrollen, wie im Einstellungen-Reiter.
+Die zwei Werte aus den Einstellungen werden beim Anzeigen eingesetzt (`<<1>>`), der Text kann ihnen
+also nicht widersprechen.
 
 ---
 
@@ -73,11 +79,12 @@ Der Autopilot kann also rechnen, was er will: Das Triebwerk bleibt dunkel. Im Fl
 das als hohen Wert in `drossel` bei `engThr = 0` und `istAcc = 0` — im Fenster steht aber nichts davon.
 Deshalb gehört die Bedingung in den Text **und** in die Prüfung:
 
-* **Text** (erledigt): Absatz 5 nennt das Kontrollmodul.
-* **Prüfung im Mod** (offen): Beim Erfassen einer Stufe mitprüfen, ob sie steuerbar ist
-  (`vessel.IsControllable`). Ist sie es nicht und hat sie auch keine Fallschirme, wird sie mit dem
-  Grund **„kein Kontrollmodul"** übersprungen statt in den Absturz geschickt; hat sie Fallschirme,
-  wird sie weiter verfolgt, aber die Triebwerkslandung bleibt aus und die Zustandszeile sagt warum.
+* **Text** (erledigt, 0.9.33): Absatz 5 nennt das Kontrollmodul.
+* **Prüfung im Mod** (erledigt, 0.9.33): Beim Erfassen einer Stufe wird mitgeprüft, ob sie ein
+  Steuermodul hat (`ModuleCommand`). Ist keines da und hat die Stufe auch keine Fallschirme, wird sie
+  mit dem Grund **„kein Kontrollmodul am Booster"** übersprungen statt in den Absturz geschickt; hat
+  sie Fallschirme, wird sie weiter verfolgt, der Landeautomat bleibt aus und die Zustandszeile sagt
+  **„Booster nicht steuerbar – keine Triebwerkslandung"** (`tests/TrackingAcceptanceTests.cs`).
 
 ## Werte, die aus den Einstellungen kommen
 

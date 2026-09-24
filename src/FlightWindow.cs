@@ -13,7 +13,7 @@ namespace BoosterWatch
         {
             float w = window.width - 36;
             GUI.Label(new Rect(18, 12, w - 120, 30), "PhysStageRecovery", windowTheme.Title);
-            GUI.Label(new Rect(window.width - 125, 17, 60, 22), "0.9.33", windowTheme.Small);
+            GUI.Label(new Rect(window.width - 125, 17, 60, 22), "0.9.34", windowTheme.Small);
             if (GUI.Button(new Rect(window.width - 48, 14, 30, 28), new GUIContent("×", Loc.Get("#PSR_Window_Close")), windowTheme.Button)) SetVisible(false);
             GUI.Label(new Rect(19, 44, w, 20), Loc.Get("#PSR_Window_Tagline"), windowTheme.Small);
 
@@ -54,14 +54,7 @@ namespace BoosterWatch
             float w = window.width - 36;
             if (boosters.Count == 0)
             {
-                Rect empty = new Rect(18, 168, w, window.height - 212);
-                GUI.Box(empty, "", windowTheme.Panel);
-                float emptyY = empty.y + Mathf.Max(24, (empty.height - 180) / 2);
-                GUI.Label(new Rect(38, emptyY, w - 40, 32), faulted ? Loc.Get("#PSR_Status_TrackingStopped")
-                    : enabledMod ? Loc.Get("#PSR_Window_Ready") : Loc.Get("#PSR_Window_ModOff"), windowTheme.Heading);
-                GUI.Label(new Rect(38, emptyY + 44, w - 40, 62), faulted ? notice :
-                    Loc.Get("#PSR_Window_EmptyHint"), windowTheme.Body);
-                GUI.Label(new Rect(38, emptyY + 117, w - 40, 50), initialized ? notice : Loc.Get("#PSR_Window_FlyingHint"), windowTheme.Muted);
+                DrawGuide(new Rect(18, 168, w, window.height - 212));
                 return;
             }
             TrackedBooster b = boosters[Mathf.Clamp(selection, 0, boosters.Count - 1)];
@@ -113,6 +106,82 @@ namespace BoosterWatch
             GUI.Label(new Rect(window.width - 166, y, 146, 28), new GUIContent(
                 Loc.Get("#PSR_Window_Throttle", RecoveryPolicy.Finite(throttle) ? (100 * throttle).ToString("0") : "—"),
                 Loc.Get("#PSR_Window_ThrottleHint")), windowTheme.Heading);
+        }
+        // What the window says while no booster is tracked: the state, then why nothing was taken over,
+        // then the guide. The guide is longer than the window has room for at its smallest size, so it
+        // scrolls - with the mouse wheel over it, exactly like the settings tab.
+        private Vector2 guideScroll;
+        private void DrawGuide(Rect area)
+        {
+            GUI.Box(area, "", windowTheme.Panel);
+            float width = area.width - 32;
+            float y = area.y + 12;
+            GUI.Label(new Rect(area.x + 16, y, width, 30), faulted ? Loc.Get("#PSR_Status_TrackingStopped")
+                : enabledMod ? Loc.Get("#PSR_Window_Ready") : Loc.Get("#PSR_Window_ModOff"), windowTheme.Heading);
+            y += 34;
+            string message = GuideMessage();
+            if (message.Length > 0)
+            {
+                float height = windowTheme.Muted.CalcHeight(new GUIContent(message), width);
+                GUI.Label(new Rect(area.x + 16, y, width, height), message, windowTheme.Muted);
+                y += height + 8;
+            }
+            Rect view = new Rect(area.x + 8, y, area.width - 16, Mathf.Max(60, area.yMax - y - 8));
+            string[] titles = GuideTitles();
+            string[] texts = GuideTexts();
+            float inner = view.width - 26;
+            float content = 0;
+            for (int i = 0; i < titles.Length; i++)
+                content += GuideHeight(titles[i], texts[i], inner);
+            guideScroll = GUI.BeginScrollView(view, guideScroll, new Rect(0, 0, inner + 4, content));
+            float block = 0;
+            for (int i = 0; i < titles.Length; i++)
+            {
+                float titleHeight = windowTheme.Body.CalcHeight(new GUIContent(titles[i]), inner);
+                GUI.Label(new Rect(10, block, inner, titleHeight), titles[i], windowTheme.Body);
+                block += titleHeight + 1;
+                float textHeight = windowTheme.Muted.CalcHeight(new GUIContent(texts[i]), inner);
+                GUI.Label(new Rect(10, block, inner, textHeight), texts[i], windowTheme.Muted);
+                block += textHeight + 12;
+            }
+            GUI.EndScrollView();
+        }
+        private float GuideHeight(string title, string text, float width)
+        {
+            return windowTheme.Body.CalcHeight(new GUIContent(title), width) + 1
+                + windowTheme.Muted.CalcHeight(new GUIContent(text), width) + 12;
+        }
+        // The one line that explains the state: an error, a stage that was not taken over, or the
+        // rocket whose separations are being watched.
+        private string GuideMessage()
+        {
+            if (faulted) return notice;
+            if (skipNotice.Length > 0) return skipNotice;
+            return initialized ? notice : "";
+        }
+        private string[] GuideTitles()
+        {
+            return new[]
+            {
+                Loc.Get("#PSR_Help_IntroTitle"), Loc.Get("#PSR_Help_TrackedTitle"), Loc.Get("#PSR_Help_ChutesTitle"),
+                Loc.Get("#PSR_Help_PoweredTitle"), Loc.Get("#PSR_Help_GearTitle"), Loc.Get("#PSR_Help_AutoStageTitle"),
+                Loc.Get("#PSR_Help_RecoveryTitle"), Loc.Get("#PSR_Help_WarpTitle")
+            };
+        }
+        // Two of the texts name a value from the settings, so the guide cannot contradict them.
+        private string[] GuideTexts()
+        {
+            return new[]
+            {
+                Loc.Get("#PSR_Help_Intro"),
+                Loc.Get("#PSR_Help_Tracked", settings.MaxBoosters),
+                Loc.Get("#PSR_Help_Chutes", settings.ChuteHeight.ToString("0") + " m"),
+                Loc.Get("#PSR_Help_Powered"),
+                Loc.Get("#PSR_Help_Gear"),
+                Loc.Get("#PSR_Help_AutoStage"),
+                Loc.Get("#PSR_Help_Recovery"),
+                Loc.Get("#PSR_Help_Warp")
+            };
         }
         private void Metric(Rect rect, string label, string value)
         {

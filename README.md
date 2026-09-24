@@ -1,8 +1,62 @@
-# PhysStageRecovery 0.9.32 — KSP 1.12.5
+# PhysStageRecovery 0.9.34 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
 **MechJeb muss weder installiert noch als Bauteil am Booster vorhanden sein.** Die benötigten Algorithmen sind im eigenen Plugin enthalten. Erforderlich ist weiterhin Harmony 2 unter `GameData/000_Harmony/0Harmony.dll`.
+
+## 0.9.34: Die Anleitung steht im Fenster
+
+Solange kein Booster erfasst ist, zeigt das Fenster jetzt eine kurze Anleitung in **acht Absätzen**:
+was der Mod macht, welche Stufen übernommen werden, Fallschirme, Triebwerkslandung, Landebeine und
+Bremsen, Autostaging, Bergung, und was während des Flugs gilt. Jeder Absatz eine Überschrift und ein
+bis zwei Sätze; länger als die kleinste Fenstergröße hergibt, deshalb liegt der Text in einem
+**Scrollbereich** (Mausrad, wie im Einstellungen-Reiter).
+
+Zwei Zahlen stehen **nicht** im Text, sondern kommen aus den Einstellungen und werden beim Anzeigen
+eingesetzt: die Höchstzahl gleichzeitiger Booster (`<<1>>`) und die Schirmhöhe. Der Text kann der
+Einstellung damit nicht widersprechen — im Beispiel oben stand `(1100 m über Grund)`, weil genau das
+eingestellt ist.
+
+**Ein Fehler kam dabei heraus:** Die Zeile „Nicht erfasst: …", die erklärt, warum eine abgetrennte
+Stufe *nicht* übernommen wurde, wurde seit 0.8.0 zwar gesetzt, aber **nie angezeigt** — ein totes Feld
+(`skipNotice`). Der neue Text verspricht „Sonst nennt das Fenster den Grund"; deshalb steht die Zeile
+jetzt über der Anleitung, zusammen mit dem Fehler- oder Beobachtungshinweis.
+
+Die Anleitung liegt in beiden Sprachen in den Sprachdateien (16 neue Texte, damit **141 Tags**),
+englisch in `en-us.cfg`, deutsch in `de-de.cfg`. Der Beschreibungstext selbst steht mit allen
+Hinweisen für den Einbau in `docs/ANLEITUNG.md`.
+
+## 0.9.33: Die Triebwerkslandung verlangt ein Kontrollmodul
+
+**Gemessen, nicht angenommen.** Ohne Steuermodul kommt ein befohlener Schub gar nicht erst am
+Triebwerk an:
+
+* `Vessel.CheckControllable()` (gerufen aus `Vessel.LateUpdate`) setzt
+  `isControllable = GetControlLevel() > 0`; `GetControlLevel()` liefert ohne Besatzung und ohne
+  Steuermodul **0** (es zählt die Steuermodule der Bauteile und die CommNet-Verbindung).
+* `ModuleEngines.UpdateThrottle()` fragt über `Part.get_isControllable()` genau diesen Wert ab und
+  **springt vor dem Setzen von `requestedThrottle` heraus**, wenn er falsch ist.
+
+Der Landeautomat konnte also rechnen, was er wollte — das Triebwerk blieb dunkel und der Booster schlug
+auf, ohne dass im Fenster stand warum. Im Flugschreiber war es nur als hoher Wert in `drossel` bei
+`engThr = 0` und `istAcc = 0` zu erahnen.
+
+Deshalb gilt jetzt (testbare Regel in `src/TrackingAcceptance.cs`, 9 Prüfungen):
+
+* **Fallschirme genügen immer.**
+* Ohne Fallschirme braucht die Triebwerkslandung ein Triebwerk **und** ein Steuermodul. Eine Stufe mit
+  Triebwerk, aber ohne Steuermodul wird beim Erfassen mit dem Grund **„kein Kontrollmodul am Booster"**
+  übersprungen, statt in den Absturz geschickt zu werden.
+* Eine Stufe **mit** Fallschirmen wird weiter verfolgt: Der Landeautomat bleibt aus, und die
+  Zustandszeile sagt **„Booster nicht steuerbar – keine Triebwerkslandung"** (solange keine Schirme
+  tragen; hängen sie, steht dort wieder „Fallschirmlandung").
+* Einmalige Logzeile: `Kein Kontrollmodul an <id> (<Name>) - Triebwerkslandung nicht moeglich, es
+  bleibt bei Fallschirmen.` Die Zeile `Tracking <id> <Name>` nennt zusätzlich `control=True|False`.
+
+**Eine Feinheit ist entschärft:** KSP berechnet das Flag in `Vessel.LateUpdate`, eine in derselben
+Frame abgetrennte Stufe trägt also noch den Wert von vorher. Die erste Sekunde nach dem Erfassen wird
+deshalb nicht gewertet, sonst würde der Mod einmal fälschlich „kein Kontrollmodul" melden. Für eine
+Rakete mit Sonde ändert sich nichts.
 
 ## 0.9.32: Die Oberfläche folgt der Sprache, die in KSP eingestellt ist
 
