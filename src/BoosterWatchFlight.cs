@@ -78,7 +78,7 @@ namespace BoosterWatch
             GameEvents.onCrash.Add(OnCrash);
             GameEvents.onCrashSplashdown.Add(OnCrash);
             AddToolbar();
-            Debug.Log("[PhysStageRecovery] 0.9.32 started; physics range " + settings.PhysicsRange + " m.");
+            Debug.Log("[PhysStageRecovery] 0.9.33 started; physics range " + settings.PhysicsRange + " m.");
         }
 
         private void AddToolbar()
@@ -373,12 +373,13 @@ namespace BoosterWatch
                     else
                     {
                         bool chutes = v.parts.Any(p => p.FindModulesImplementing<ModuleParachute>().Count > 0);
-                        bool engine = settings.PoweredLanding && v.parts.Any(p => p.FindModulesImplementing<ModuleEngines>()
+                        bool engines = v.parts.Any(p => p.FindModulesImplementing<ModuleEngines>()
                             .Any(PoweredLanding.Suitable));
-                        if (!chutes && !engine)
-                            skip = settings.PoweredLanding
-                                ? Loc.Get("#PSR_Skip_NoLandingMeans")
-                                : Loc.Get("#PSR_Skip_NoChutesAndOff");
+                        // A control module is what lets KSP's engines answer a throttle at all; see
+                        // TrackingAcceptance for why an engine without one is refused.
+                        bool control = v.parts.Any(p => p.FindModuleImplementing<ModuleCommand>() != null);
+                        string refusal = TrackingAcceptance.Reason(chutes, settings.PoweredLanding, engines, control);
+                        if (refusal != null) skip = Loc.Get(refusal);
                     }
                 }
                 if (skip != null) { ReportSkip(v, skip); continue; }
@@ -418,7 +419,7 @@ namespace BoosterWatch
                 .Any(e => PoweredLanding.Suitable(e) && PoweredLanding.HasPropellant(e)));
             if (windowOpenPolicy.Observe(v.id, newSeparation, usableChute || fueledEngine, settings.AutoOpenWindow, enabledMod))
             { settingsOpen = false; SetVisible(true); }
-            Debug.Log("[PhysStageRecovery] Tracking " + b.Id + " " + b.Name);
+            Debug.Log("[PhysStageRecovery] Tracking " + b.Id + " " + b.Name + " control=" + v.IsControllable);
             RecoveryJournal journal = RecoveryJournal.Instance;
             if (journal == null) return;
             if (!journal.Entries.ContainsKey(v.id))

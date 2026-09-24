@@ -13,7 +13,7 @@ namespace BoosterWatch
         {
             float w = window.width - 36;
             GUI.Label(new Rect(18, 12, w - 120, 30), "PhysStageRecovery", windowTheme.Title);
-            GUI.Label(new Rect(window.width - 125, 17, 60, 22), "0.9.32", windowTheme.Small);
+            GUI.Label(new Rect(window.width - 125, 17, 60, 22), "0.9.33", windowTheme.Small);
             if (GUI.Button(new Rect(window.width - 48, 14, 30, 28), new GUIContent("×", Loc.Get("#PSR_Window_Close")), windowTheme.Button)) SetVisible(false);
             GUI.Label(new Rect(19, 44, w, 20), Loc.Get("#PSR_Window_Tagline"), windowTheme.Small);
 
@@ -145,6 +145,10 @@ namespace BoosterWatch
             if (b.Finished) return b.ImpactFailed ? Loc.Get("#PSR_Status_LandingFailed") : Loc.Get("#PSR_Status_TrackingFinished");
             if (!enabledMod) return Loc.Get("#PSR_Status_ModOff");
             if (!b.Sample.PhysicsActive) return Loc.Get("#PSR_Status_WaitingSimulation");
+            // An uncontrollable booster cannot be landed under power whatever the autopilot does, so
+            // the window names that instead of a descent state that will never happen. While canopies
+            // are carrying it, the chute landing is the better answer.
+            if (b.ControlMissing && settings.PoweredLanding && b.OpenChutes == 0) return Loc.Get("#PSR_Status_NoControl");
             if (b.Sample.Sink < 0) return Loc.Get("#PSR_Status_Climbing");
             if (b.Landing.InFinalDescent) return Loc.Get("#PSR_Status_FinalApproach");
             if (b.OpenChutes > 0) return Loc.Get("#PSR_Status_ChuteLanding");

@@ -27,6 +27,13 @@ $locExe = Join-Path $testDir 'LocalizationTests.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Localization test compilation failed.' }
 & $locExe $PSScriptRoot
 if ($LASTEXITCODE -ne 0) { throw 'Localization tests failed.' }
+# Which stages are taken over: canopies always count, a powered landing needs an engine and a control
+# module (without one KSP's engines ignore the throttle). Plain logic, no KSP.
+$acceptExe = Join-Path $testDir 'TrackingAcceptanceTests.exe'
+& $compiler /nologo /target:exe ('/out:' + $acceptExe) (Join-Path $PSScriptRoot 'src\TrackingAcceptance.cs') (Join-Path $PSScriptRoot 'tests\TrackingAcceptanceTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Tracking acceptance test compilation failed.' }
+& $acceptExe
+if ($LASTEXITCODE -ne 0) { throw 'Tracking acceptance tests failed.' }
 $harmony = Join-Path $KspDir 'GameData\000_Harmony\0Harmony.dll'
 $guardExe = Join-Path $testDir 'ParachuteGuardTests.exe'
 Copy-Item -LiteralPath $harmony -Destination (Join-Path $testDir '0Harmony.dll') -Force

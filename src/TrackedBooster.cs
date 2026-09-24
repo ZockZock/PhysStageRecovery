@@ -20,6 +20,11 @@ namespace BoosterWatch
         public VesselRanges OriginalRanges, ExtendedRanges;
         public bool UnpackExtended, Finished;
         public bool ImpactFailed;
+        // True while the vessel cannot be controlled by KSP at all - no control module, or a probe
+        // without a connection. The engines would ignore every throttle command.
+        public bool ControlMissing;
+        private bool reportedNoControl;
+        private double firstMeasure = double.NaN;
         public string GearStatus = "";
         public bool GearRequested;
         // True while the booster is at the exact terrain height but KSP built no ground collider
@@ -98,6 +103,20 @@ namespace BoosterWatch
             foreach (Part part in v.parts) KnownParts.Add(part.flightID);
             Distance = Vector3d.Distance(v.GetWorldPos3D(), FlightGlobals.ActiveVessel.GetWorldPos3D());
             bool physics = v.loaded && !v.packed && !v.HoldPhysics;
+            // KSP's engines only answer a controllable vessel (see TrackingAcceptance), so a booster
+            // without a control module cannot be flown - the autopilot would command thrust that never
+            // arrives. Re-read every tick: a probe can lose and regain its connection. The first second
+            // is left alone on purpose: KSP computes the flag in Vessel.LateUpdate, and a stage
+            // separated in this very frame still carries the value from before it existed. A stage
+            // that has no control module at all is already refused when it is scanned.
+            if (double.IsNaN(firstMeasure)) firstMeasure = Sample.Time;
+            ControlMissing = !v.IsControllable && Sample.Time - firstMeasure > 1.0;
+            if (ControlMissing && settings.PoweredLanding && !reportedNoControl)
+            {
+                reportedNoControl = true;
+                Debug.Log("[PhysStageRecovery] Kein Kontrollmodul an " + v.id + " (" + v.vesselName
+                    + ") - Triebwerkslandung nicht moeglich, es bleibt bei Fallschirmen.");
+            }
             Sample = new DescentSample { Time = Planetarium.GetUniversalTime(),
                 PhysicsActive = physics, Clearance = double.NaN,
                 Eligible = !ImpactFailed && recoveryEnabled && v != FlightGlobals.ActiveVessel && v.GetCrewCount() == 0
@@ -209,7 +228,8 @@ namespace BoosterWatch
             }
             bool automationEligible = v != FlightGlobals.ActiveVessel && v.GetCrewCount() == 0
                 && v.mainBody.isHomeWorld && !v.LandedOrSplashed && Distance <= settings.PhysicsRange;
-            Landing.Step(settings, Sample, automationEligible && !ImpactFailed, Descent.AllowsOpening(Sample.Time, v.verticalSpeed));
+            Landing.Step(settings, Sample, automationEligible && !ImpactFailed && !ControlMissing,
+                Descent.AllowsOpening(Sample.Time, v.verticalSpeed));
             Sample.PoweredControlled = Landing.RecoveryReady;
             Decision = Policy.Evaluate(Sample, settings.Limits);
             Status = Distance > settings.PhysicsRange ? "Ausserhalb der eingestellten Reichweite" : Decision.Reason;

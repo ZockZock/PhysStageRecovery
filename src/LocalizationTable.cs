@@ -60,6 +60,7 @@ namespace BoosterWatch
             { "#PSR_Status_ChuteLanding", "Parachute landing" },
             { "#PSR_Status_PoweredLanding", "Powered landing" },
             { "#PSR_Status_DescentTracked", "Descent tracked" },
+            { "#PSR_Status_NoControl", "Booster not controllable - no powered landing" },
             { "#PSR_Phase_Ready", "Ready" },
             { "#PSR_Phase_Align", "Aligning" },
             { "#PSR_Phase_Entry", "Entry" },
@@ -112,6 +113,7 @@ namespace BoosterWatch
             { "#PSR_Skip_AlreadyCrashed", "already recorded as a crash" },
             { "#PSR_Skip_Journal", "recovery journal: <<1>>" },
             { "#PSR_Skip_NoLandingMeans", "neither parachutes nor a suitable engine" },
+            { "#PSR_Skip_NoControlModule", "no control module on the booster" },
             { "#PSR_Skip_NoChutesAndOff", "no parachutes, and powered landing is switched off" },
 
             // The status words the recovery journal stores. They are written to the save file in
