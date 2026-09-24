@@ -12,6 +12,8 @@ namespace BoosterWatch
         private double nextUpdate = double.NegativeInfinity;
         public double SurfaceSpeed = double.NaN, Throttle = double.NaN;
         public double FuelFraction = double.NaN, RemainingDeltaV = double.NaN;
+        // The landing reserve configured on this booster's engines, for the fuel bar in the window.
+        public readonly ReserveStatus Reserve = new ReserveStatus();
 
         public void Update(Vessel vessel, double now)
         {
@@ -21,6 +23,7 @@ namespace BoosterWatch
             nextUpdate = now + 0.5;
             try
             {
+                Reserve.Update(vessel);
                 // Include empty engines: a dry tank should read zero, not disappear.
                 var engines = vessel.parts.SelectMany(p => p.FindModulesImplementing<ModuleEngines>())
                     .Where(EngineSelection.Suitable).ToList();

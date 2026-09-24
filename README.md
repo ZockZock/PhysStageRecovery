@@ -1,8 +1,52 @@
-# PhysStageRecovery 0.9.21 — KSP 1.12.5
+# PhysStageRecovery 0.9.22 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
 **MechJeb muss weder installiert noch als Bauteil am Booster vorhanden sein.** Die benötigten Algorithmen sind im eigenen Plugin enthalten. Erforderlich ist weiterhin Harmony 2 unter `GameData/000_Harmony/0Harmony.dll`.
+
+## 0.9.22: Der Vorhalt bleibt gespeichert — und man sieht ihn
+
+Zwei Befunde aus dem ersten Flugtest: Die Stufentrennung am Vorhalt hat funktioniert, aber der in der
+Werkstatt eingestellte Wert war auf der Startrampe weg. Und der Vorhalt soll im Flug sichtbar sein.
+
+**Warum der Wert verloren ging — gemessen, nicht geraten.** KSP nimmt die Module eines Bauteils aus
+dessen **Bauteilkonfiguration**. Ein Modul, das einem Bauteil erst danach angehängt wird, überlebt den
+nächsten Neuaufbau dieses Bauteils nicht:
+
+* Ein gestartetes Schiff entsteht aus `ProtoPartSnapshot.CreatePart()` → `Instantiate(prefab)`.
+* `ProtoPartModuleSnapshot.Load()` → `Part.LoadModule(node, out index)` füllt danach nur **Werte** in
+  Module, die das neue Bauteil **schon hat**. Es legt kein fehlendes Modul an — in der installierten
+  `Assembly-CSharp.dll` nachgeprüft: kein `AddComponent`, kein `PartModuleList.Add` in dieser Kette.
+* Das nachträglich angehängte Modul war auf der Rampe also nicht mehr vorhanden, und das Nachhängen im
+  Flug erzeugte ein frisches Modul mit **0 %**. Genau das war zu sehen.
+
+Deshalb trägt der Mod das Modul jetzt **in die Bauteilkonfiguration** ein: Ein Harmony-Prefix auf
+`PartLoader.ParsePart` hängt `MODULE { name = ModuleFuelReserve }` an jedes Teil mit Triebwerk, *bevor*
+KSP es parst (`src/FuelReserveConfig.cs`). Damit ist der Vorhalt ein Bauteilmodul wie jedes Stock-Modul
+— in der Werkstatt, in der Werkstattdatei, im Spielstand und auf der Startrampe. Weiterhin **kein
+ModuleManager nötig**; Harmony ist ohnehin Voraussetzung.
+
+Beim Start steht die Kontrolle in `KSP.log`:
+
+```
+[PhysStageRecovery] Lande-Vorhalt: 42 von 42 Triebwerksteilen mit Regler.
+```
+
+Steht dort weniger, fehlt an einem Teil der Regler — das Log meldet es dann als Fehler, und ein dort
+gesetzter Vorhalt überlebt Werkstatt und Rampe nicht. Triebwerke ohne Abschaltung (Feststoffbooster)
+bekommen den Regler weiterhin nicht zu sehen.
+
+**Der Vorhalt ist jetzt sichtbar.** In der **Flugübersicht** zeigt die Treibstoffanzeige den Vorhalt
+wie in Kerbal Engineer: Der reservierte Anteil steht **schraffiert** am linken Ende des Balkens, eine
+weiße Markierung trennt ihn vom nutzbaren Treibstoff. Wandert der Füllstand in die Schraffur, lebt die
+Landung von ihrem Vorhalt.
+
+* Am **verfolgten Booster** wird der Balken dann gegen die **eigenen Tanks** des Landetriebwerks
+  gelesen, nicht gegen das ganze Schiff — nur so passen Füllstand und Vorhaltmarke auf dieselbe Skala.
+  Der Hinweistext am Balken nennt den Vorhalt im Klartext (`25 % = 4.89 t aus 2 Tanks, ca. 780 m/s`).
+* Solange die Rakete **noch ein Stück** ist, also kein Booster verfolgt wird, steht im Panel die Karte
+  `LANDE-VORHALT` der fliegenden Rakete: Wert, Balken mit Schraffur und der Zustand, etwa
+  `Vorhalt aktiv: Rest 41.2 % (Grenze 25 %)`.
 
 ## 0.9.21: Lande-Vorhalt am Triebwerk
 

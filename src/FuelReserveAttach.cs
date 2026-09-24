@@ -77,8 +77,9 @@ namespace BoosterWatch
             if (added <= 0) return;
             reported += added;
             if (reported == added)
-                Debug.Log("[PhysStageRecovery] Lande-Vorhalt: Schieberegler an " + added
-                    + " Triebwerksteil(en) im Editor verfuegbar.");
+                Debug.LogWarning("[PhysStageRecovery] Lande-Vorhalt an " + added + " Triebwerksteil(en) im Editor "
+                    + "nachgehaengt. Der Bauteilpatch hat nicht gegriffen; ein so gesetzter Vorhalt ueberlebt "
+                    + "Werkstatt und Startrampe nicht.");
         }
     }
 
@@ -110,8 +111,9 @@ namespace BoosterWatch
             if (added <= 0) return;
             reported += added;
             if (reported == added)
-                Debug.Log("[PhysStageRecovery] Lande-Vorhalt: Schieberegler an " + added
-                    + " Triebwerksteil(en) im Flug verfuegbar.");
+                Debug.LogWarning("[PhysStageRecovery] Lande-Vorhalt an " + added + " Triebwerksteil(en) im Flug "
+                    + "nachgehaengt. Der Bauteilpatch hat nicht gegriffen; ein so gesetzter Vorhalt ueberlebt "
+                    + "Werkstatt und Startrampe nicht.");
         }
     }
 }

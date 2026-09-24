@@ -11,6 +11,7 @@ namespace BoosterWatch
     public sealed partial class BoosterWatchFlight : MonoBehaviour
     {
         private readonly List<TrackedBooster> boosters = new List<TrackedBooster>();
+        private readonly ReserveStatus activeReserve = new ReserveStatus();
         private readonly HashSet<uint> family = new HashSet<uint>();
         private readonly HashSet<uint> failedParts = new HashSet<uint>();
         private readonly HashSet<uint> attachedBoosterChutes = new HashSet<uint>();
@@ -74,7 +75,7 @@ namespace BoosterWatch
             GameEvents.onCrash.Add(OnCrash);
             GameEvents.onCrashSplashdown.Add(OnCrash);
             AddToolbar();
-            Debug.Log("[PhysStageRecovery] 0.9.21 started; physics range " + settings.PhysicsRange + " m.");
+            Debug.Log("[PhysStageRecovery] 0.9.22 started; physics range " + settings.PhysicsRange + " m.");
         }
 
         private void AddToolbar()
@@ -229,6 +230,9 @@ namespace BoosterWatch
                 {
                     nextScan = Time.unscaledTime + 0.2f;
                     ScanVessels();
+                    // The reserve of the rocket being flown: the window shows it while there is no
+                    // separated booster yet.
+                    activeReserve.Update(FlightGlobals.ActiveVessel);
                 }
                 double now = Planetarium.GetUniversalTime();
                 if (now < nextMeasure) return;
