@@ -74,7 +74,7 @@ namespace BoosterWatch
         private readonly HashSet<Part> seen = new HashSet<Part>();
         private readonly Queue<Part> open = new Queue<Part>();
         private Vessel startVessel;
-        private string engineName = "", releaseReason = "";
+        private string engineName = "", releaseReason = "", stockMarkers = "";
         private double dryMass, isp, lockTime = double.NegativeInfinity, nextRelightNote = double.NegativeInfinity;
         private int tankCount, unstoppable, relights;
         private bool setup, shuttable, locked, started, flew, faulted, textDirty = true, padWarned;
@@ -83,6 +83,16 @@ namespace BoosterWatch
         // Read by the reserve display: what this engine's reserve is and whether it still holds.
         public string EngineTitle { get { return engineName; } }
         public double OwnTankShare { get { return FuelReserve.RemainingShare(stocks); } }
+        public string Markers { get { return stockMarkers; } }
+
+        private void AddMarker(string marker)
+        {
+            if (string.IsNullOrEmpty(marker)) return;
+            marker = marker.Trim();
+            if (marker.Length < 2) return;
+            if (stockMarkers.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0) return;
+            stockMarkers += (stockMarkers.Length > 0 ? "|" : "") + marker;
+        }
 
         // A module put on a part at runtime gets no OnStart, so everything that has to happen once is
         // done from the update hooks instead - and from OnAwake, which KSP calls while the module is
@@ -257,7 +267,7 @@ namespace BoosterWatch
         private void RefreshGroup()
         {
             stockTanks.Clear(); stockIds.Clear(); stockNames.Clear(); stockDensities.Clear();
-            stocks.Clear(); propellantIds.Clear();
+            stocks.Clear(); propellantIds.Clear(); stockMarkers = "";
             dryMass = 0; isp = 0; tankCount = 0; shuttable = false;
             if (part == null) return;
             List<ModuleEngines> engines = part.FindModulesImplementing<ModuleEngines>();
@@ -279,6 +289,12 @@ namespace BoosterWatch
                         PartResourceDefinition definition = PartResourceLibrary.Instance != null
                             ? PartResourceLibrary.Instance.GetDefinition(propellant.id) : null;
                         if (definition == null) continue;
+                        // How the stock resource box labels this propellant: its abbreviation ("FT" for
+                        // LiquidFuel), its display name and its technical name. The reserve hatch looks
+                        // for the box with one of those on it.
+                        AddMarker(definition.abbreviation);
+                        AddMarker(definition.displayName);
+                        AddMarker(definition.name);
                         propellantIds.Add(propellant.id);
                         stockIds.Add(propellant.id);
                         stockNames.Add(propellant.displayName);

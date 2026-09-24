@@ -1,4 +1,4 @@
-# PhysStageRecovery 0.9.29 — KSP 1.12.5
+# PhysStageRecovery 0.9.30 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
@@ -35,6 +35,39 @@ Beim Start steht die Kontrolle in `KSP.log`:
 Steht dort weniger, fehlt an einem Teil der Regler — das Log meldet es dann als Fehler, und ein dort
 gesetzter Vorhalt überlebt Werkstatt und Rampe nicht. Triebwerke ohne Abschaltung (Feststoffbooster)
 bekommen den Regler weiterhin nicht zu sehen.
+
+## 0.9.30: Die Reserve steht **in** der FT-Box
+
+Ein eigenes Kästchen neben dem Icon war die falsche Antwort — sie gehört in das Kästchen, das der
+Spieler ohnehin liest. Und dafür liefert KSP alles Nötige als öffentliche API, sodass die Position
+**berechenbar** ist statt geraten:
+
+```csharp
+icon.GetComponentsInChildren<StageIconInfoBox>()   // die Kästchen am Stufen-Icon
+box.GetComponentInChildren<Slider>()               // sein Balken
+slider.value, minValue, maxValue                   // der Füllstand, in Einheiten des Balkens
+slider.fillRect                                    // das gefüllte Rechteck
+slider.fillRect.parent                             // die volle Spur, in der es läuft
+slider.direction                                   // LeftToRight / RightToLeft / …
+```
+
+Welches Kästchen zu welchem Treibstoff gehört, sagt sein **eigener Text**: gesucht wird das Kästchen,
+dessen Beschriftung die Abkürzung (`FT` für LiquidFuel), den Anzeigenamen oder den technischen Namen
+eines reservierten Treibstoffs enthält — gelesen generisch über die `text`-Eigenschaft, damit der Mod
+keine TextMeshPro-Referenz braucht.
+
+Die Schraffur ist damit ein `RawImage` **in der Spur des Stock-Balkens**, hinter dem Füllstand
+gezeichnet und auf den **gefüllten** Teil begrenzt: sie markiert das Ende, zu dem der Treibstoff
+hinausläuft — dort liegt die Reserve. Steht der Tank auf seinem Vorhalt, ist der ganze gefüllte Balken
+schraffiert. Das Kästchen selbst, seine Beschriftung und sein Füllstand bleiben unangetastet; es
+verschwindet und entsteht mit dem Stufen-Icon, und der Mod hängt die Schraffur neu ein, wenn sie weg
+ist.
+
+Beim ersten Anhängen steht im Log, welche Kästchen am Icon hängen — oder warum keins passt:
+
+```
+[PhysStageRecovery] Lande-Vorhalt: Schraffur in 1 Stock-Kaestchen des Triebwerks (Kaestchen: 'FT').
+```
 
 ## 0.9.29: Die Anzeige ist ein Stock-Infokästchen — recherchiert statt probiert
 
