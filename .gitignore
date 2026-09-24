@@ -7,6 +7,7 @@ dist/
 
 # Ausgelieferte Archive (jederzeit aus dem Quelltext reproduzierbar)
 *.zip
+*.zip.sha256
 
 # Prüfsummenlisten der eingefrorenen Schnappschüsse
 SHA256SUMS.txt
