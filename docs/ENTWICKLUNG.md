@@ -7,7 +7,7 @@ Tags, die Ordner unter `build/backups/` bleiben als physische Kopie daneben best
 
 Versioniert sind `src/`, `tests/`, `tools/`, `packaging/`, `docs/` und die Skripte
 `build.ps1`, `test.ps1`, `install.ps1` samt `BoosterWatch.csproj`, `README.md`,
-`THIRD_PARTY.md` und `LICENSE` — 88 Dateien.
+`THIRD_PARTY.md` und `LICENSE` — 93 Dateien.
 
 Nicht versioniert (siehe `.gitignore`): `build/` (Prüfstands-Binaries, Schnappschüsse),
 `dist/` (Bauausgabe), die ausgelieferten `*.zip`-Archive und die `SHA256SUMS.txt` der
@@ -48,6 +48,7 @@ Beim Start steht die Kontrolle in `KSP.log`:
 | `v0.9.20` | Volllastbremsung bis zur Auffanghöhe, schubachsenbewusste Vorhersage, späte Zündung | `docs/BASELINE-0.9.20.md` |
 | `v0.9.31` | Lande-Vorhalt am Triebwerk (Bauteilmodul, MechJeb trennt darauf), Anzeige schraffiert in der Stock-FT-Box | `docs/BASELINE-0.9.31.md` |
 | `v0.9.32` | Oberfläche folgt der Sprache von KSP (125 Tags, en-us + de-de, englischer Text zusätzlich in der DLL) | `docs/BASELINE-0.9.32.md` |
+| `v0.9.37` | Kontrollmodul-Pflicht für die Triebwerkslandung, Anleitung im Fenster, Vorhalt nur um Kerbin, „Ziel-Sinken" als einziges Ziel, nur ein noch geschlossener Schirm zählt | `docs/BASELINE-0.9.37.md` |
 
 ```powershell
 git log --oneline --decorate          # Historie mit Tags
