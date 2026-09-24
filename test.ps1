@@ -20,6 +20,13 @@ $reserveExe = Join-Path $testDir 'FuelReserveTests.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Reserve test compilation failed.' }
 & $reserveExe
 if ($LASTEXITCODE -ne 0) { throw 'Landing reserve tests failed.' }
+# The texts: the English table in the DLL against the language files, German against English, and
+# every tag used in src against the table. No KSP, no Unity - it reads the files directly.
+$locExe = Join-Path $testDir 'LocalizationTests.exe'
+& $compiler /nologo /target:exe ('/out:' + $locExe) (Join-Path $PSScriptRoot 'src\LocalizationTable.cs') (Join-Path $PSScriptRoot 'tests\LocalizationTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Localization test compilation failed.' }
+& $locExe $PSScriptRoot
+if ($LASTEXITCODE -ne 0) { throw 'Localization tests failed.' }
 $harmony = Join-Path $KspDir 'GameData\000_Harmony\0Harmony.dll'
 $guardExe = Join-Path $testDir 'ParachuteGuardTests.exe'
 Copy-Item -LiteralPath $harmony -Destination (Join-Path $testDir '0Harmony.dll') -Force

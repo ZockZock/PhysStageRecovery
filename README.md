@@ -1,8 +1,70 @@
-# PhysStageRecovery 0.9.31 — KSP 1.12.5
+# PhysStageRecovery 0.9.32 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
 **MechJeb muss weder installiert noch als Bauteil am Booster vorhanden sein.** Die benötigten Algorithmen sind im eigenen Plugin enthalten. Erforderlich ist weiterhin Harmony 2 unter `GameData/000_Harmony/0Harmony.dll`.
+
+## 0.9.32: Die Oberfläche folgt der Sprache, die in KSP eingestellt ist
+
+Alles, was der Spieler liest — Fenster, Einstellungen, Zustandszeile, Triebwerksmenü, Bildschirmmeldungen —
+kommt jetzt aus Sprachdateien: **125 Tags** in `GameData/PhysStageRecovery/Localization/`, und welche
+davon gilt, entscheidet KSP. Kein Text ist mehr im Quelltext verdrahtet.
+
+**Wie KSP die Sprache wählt — in der installierten 1.12.5 nachgesehen, nicht angenommen:**
+
+* `Localizer.GetLanguageIdFromFile()` liest `<KSP>\buildID64.txt`, Zeile `language = de-de`. Auf dieser
+  Installation steht dort **`de-de`**; `Localizer.CurrentLanguage` gibt genau das zurück.
+* `Localizer.Init()` läuft in `GameDatabase.<LoadObjects>` — also **vor** dem Übersetzen der Bauteile.
+  Ein `#tag` in einem `[KSPField(guiName = …)]` käme deshalb an; der Mod setzt seine Menünamen trotzdem
+  zur Laufzeit, weil die Sprache dort sicher feststeht.
+* Ein Mod liefert seine Texte als **jede `.cfg` in GameData** mit dem Knoten
+  `Localization { <sprach-id> { #tag = Text } }`. `Localizer.AddTagValuesForLanguage` sammelt sie über
+  `GameDatabase.GetConfigNodes("Localization")` ein — **kein ModuleManager nötig**.
+* `RefreshTagValues()` legt zuerst **`en-us`** aus *allen* Dateien an und danach die aktuelle Sprache
+  darüber. Ein nicht übersetzter Tag fällt damit auf Englisch zurück — genau deshalb bringt der Mod
+  **beide** Dateien mit: `Localization/en-us.cfg` und `Localization/de-de.cfg`.
+* Platzhalter sind `<<1>>`, `<<2>>` (`Localizer.Format(tag, args)`). So sind auch die zusammengesetzten
+  Zeilen übersetzbar: `#PSR_Window_Footer = <<1>> km Reichweite  ·  Bergung bei Bodenkontakt`.
+* **Ein Fallstrick, gemessen:** `Localizer.Format` hat *keinen* Null-Schutz (`Format` → `Instance._Format`;
+  `get_Instance` liest nur ein statisches Feld). Vor `Init()` gibt es eine `NullReferenceException`.
+  Jeder Zugriff läuft deshalb über `Loc.Get` mit Schutz und einmaliger Warnung.
+
+**Warum der englische Text zusätzlich in der DLL steht.** Fällt der `Localization`-Ordner weg, liefert
+KSP keinen Tag mehr, und ohne Netz stünden rohe `#PSR_…`-Texte im Fenster. `src/LocalizationTable.cs`
+hält deshalb jeden Tag mit seinem englischen Wortlaut, und `Loc.Get` greift darauf zurück. Damit die drei
+Orte — Tabelle, `en-us.cfg`, `de-de.cfg` — nicht auseinanderlaufen, prüft `tests/LocalizationTests.cs`
+sie gegeneinander: gleicher englischer Wortlaut, keine Waise in einer der Dateien, gleiche
+`<<n>>`-Platzhalter, keine führenden oder abschließenden Leerzeichen (die schneidet der Config-Parser
+ab) und **jeder im Quelltext benutzte Tag hat einen Text**. 12 Prüfungen, alle grün. Zusätzlich wurde
+mit **KSPs eigenem `ConfigNode.Load`** außerhalb des Spiels nachgestellt, dass die Dateien so gelesen
+werden, wie sie geschrieben sind — bis hin zu den doppelten Leerzeichen der Fußzeile.
+
+**Was bewusst nicht übersetzt wird.** Flugschreiber und reine Diagnosezeilen bleiben, wie sie sind: die
+CSV-Spalte `phase` schreibt weiter `DescentPhases.Name(...)`, und die Zustandstexte, die nur im Log und
+in der CSV landen, behalten ihren Wortlaut. Ein Log und eine CSV bleiben damit über alle Sprachen
+vergleichbar. Alles, was der Spieler **liest**, folgt dagegen der Sprache — auf einem deutschen KSP
+steht dort zeichengleich das, was vorher im Quelltext stand. Die Statuswörter des Bergungsjournals
+werden weiterhin **englisch gespeichert** (`Tracking`, `Recovered`, …), damit ein alter Spielstand seine
+Bedeutung behält; übersetzt wird nur die Anzeige.
+
+**Der Beleg beim Start** (Hauptmenü, `KSP.log`):
+
+```
+[LOG 14:42:04.181] [PhysStageRecovery] Lande-Vorhalt: 48 von 48 Triebwerksteilen mit Regler.
+[LOG 14:42:04.183] [PhysStageRecovery] Sprache 'de-de': 125 Texte, davon 121 uebersetzt und 4 wie im englischen Ersatz, 0 fehlend.
+```
+
+Die vier „wie im englischen Ersatz" sind Wörter, die in beiden Sprachen gleich lauten (`Mod`,
+`Autostaging`, `SURFACE SPEED`, `5–2000 km`). Steht die Zahl woanders, fehlt die Sprachdatei oder ist
+halb installiert — das Log sagt es, statt dass im Fenster ein Tag auftaucht.
+
+**Die Texte liegen an drei Orten, und keiner darf allein wandern:**
+
+```csharp
+Loc.Get("#PSR_Window_State", state)      // Fenster, Triebwerksmenü, Bildschirmmeldung
+Loc.Get("#PSR_Reserve_Held", 1, "7.0 %", "20 %")   // zusammengesetzt über <<1>>, <<2>>, <<3>>
+Loc.Journal("Recovered")                 // gespeicherter Zustand -> Anzeige
+```
 
 ## 0.9.22: Der Vorhalt bleibt gespeichert — und man sieht ihn
 
@@ -689,7 +751,9 @@ Die Einstellung `heatImmune` in der Einstellungsdatei hebt genau diese beiden Gr
 
 KSP schließen. Den Ordner `GameData/PhysStageRecovery` nach `KSP/GameData` kopieren oder im Projekt `./install.ps1` ausführen. Das Installationsskript sichert die bisherige DLL und erhält `PluginData/settings.cfg`. KSP anschließend neu starten.
 
-`./build.ps1` baut gegen die Bibliotheken der lokalen KSP-Installation und Harmony, ohne MechJeb-Referenzen. `./test.ps1` prüft Bergung, Aufprall, Einstellungen, Autostaging, Warp, Fallschirmschutz, die übernommenen MechJeb-Zustände sowie das neue Landegesetz und die Bodensuche. Der Compiler stammt aus Visual Studio Build Tools.
+Mit installiert werden `Localization/en-us.cfg` und `Localization/de-de.cfg`. Weitere Sprachen brauchen keine Codeänderung: eine Kopie von `en-us.cfg` unter dem Namen der KSP-Sprachkennung (`ru.cfg`, `zh-cn.cfg`, `fr-fr.cfg` …) übersetzen; nicht übersetzte Tags fallen automatisch auf Englisch zurück.
+
+`./build.ps1` baut gegen die Bibliotheken der lokalen KSP-Installation und Harmony, ohne MechJeb-Referenzen. `./test.ps1` prüft Bergung, Aufprall, Einstellungen, Autostaging, Warp, Fallschirmschutz, die übernommenen MechJeb-Zustände sowie das neue Landegesetz und die Bodensuche. Dazu kommen die Textprüfungen: Tabelle gegen `en-us.cfg`, Deutsch gegen Englisch und jeder im Quelltext benutzte Tag gegen die Tabelle. Der Compiler stammt aus Visual Studio Build Tools.
 
 Die Sinkflugtests verwenden idealisierte Dynamik. Komplette Anflüge ab 25 km prüfen geringe und zusätzliche Luftreibung, Physikwarp sowie 0,5 und 5 m/s Zielgeschwindigkeit. Ohne Bremswegprüfung reproduziert dieselbe Testbahn den verspäteten Zündbeginn und harten Aufprall. Sie prüfen senkrechte und seitliche Anflüge, schwächeren Schub sowie Physikwarp. Separate Lagereglertests prüfen die Korrektur einer 45-Grad-Abweichung und fehlendes Drehmoment. Sie ersetzen keinen KSP-Testflug mit der konkreten Rakete.
 

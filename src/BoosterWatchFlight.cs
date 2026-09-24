@@ -42,7 +42,7 @@ namespace BoosterWatch
         private Rect window = new Rect(35, 95, 480, 570);
         private ApplicationLauncherButton toolbar;
         private Texture2D icon;
-        private string notice = "Warte auf die aktive Rakete.";
+        private string notice = "";
         private const string HoverLock = "BoosterWatch.Hover", WarpLock = "BoosterWatch.Warp";
         // Degrees of camera turn per unit of the mouse axis, which is what the stock camera feels
         // like. One wheel notch is 0.1, so a notch changes the distance by eight percent.
@@ -50,6 +50,9 @@ namespace BoosterWatch
 
         public void Start()
         {
+            // The window text is taken from the language files here, not while the field is created:
+            // the player's language is what decides it, and by the flight scene it is known.
+            notice = Loc.Get("#PSR_Notice_WaitingForRocket");
             settings = Settings.Load();
             enabledMod = settings.ModEnabled; autoRecovery = settings.AutoRecovery; cameraEnabled = settings.CameraEnabled;
             cameraFeed.Distance = settings.CameraDistance; cameraFeed.Heading = settings.CameraHeading; cameraFeed.Pitch = settings.CameraPitch;
@@ -61,11 +64,11 @@ namespace BoosterWatch
             chuteHeightInput = settings.ChuteHeight.ToString("0", CultureInfo.InvariantCulture);
             ParachuteDeployment.OpenAboveGround = (float)settings.ChuteHeight;
             autoStageInput = settings.AutoStage; poweredInput = settings.PoweredLanding;
-            try { ParachuteGuard.Install(this); RailWarpGuard.Install(TrackingPhysics); }
+            try { ParachuteGuard.Install(this); RailWarpGuard.Install(TrackingPhysics, Loc.Get("#PSR_Screen_Warp")); }
             catch (Exception e)
             {
                 faulted = true;
-                notice = "Fallschirmschutz nicht verfuegbar. Details: KSP.log [PhysStageRecovery].";
+                notice = Loc.Get("#PSR_Notice_GuardUnavailable");
                 Debug.LogError("[PhysStageRecovery] Unable to install parachute guard: " + e);
             }
             GameEvents.onHideUI.Add(HideUI);
@@ -75,7 +78,7 @@ namespace BoosterWatch
             GameEvents.onCrash.Add(OnCrash);
             GameEvents.onCrashSplashdown.Add(OnCrash);
             AddToolbar();
-            Debug.Log("[PhysStageRecovery] 0.9.31 started; physics range " + settings.PhysicsRange + " m.");
+            Debug.Log("[PhysStageRecovery] 0.9.32 started; physics range " + settings.PhysicsRange + " m.");
         }
 
         private void AddToolbar()
@@ -296,7 +299,7 @@ namespace BoosterWatch
             catch (Exception e)
             {
                 faulted = true;
-                notice = "Mod wegen Fehler angehalten. Details: KSP.log [PhysStageRecovery].";
+                notice = Loc.Get("#PSR_Notice_ModHalted");
                 Debug.LogError("[PhysStageRecovery] Simulation disabled after error: " + e);
                 ReleaseWarp();
                 foreach (TrackedBooster b in boosters) b.Restore();
@@ -319,7 +322,7 @@ namespace BoosterWatch
                     { attachedBoosterChutes.Add(p.flightID); break; }
             }
             initialized = true;
-            notice = "Verfolge Abtrennungen von: " + active.vesselName;
+            notice = Loc.Get("#PSR_Notice_TrackingFrom", active.vesselName);
             RecoveryJournal journal = RecoveryJournal.Instance;
             if (journal == null) return;
             Debug.Log("[PhysStageRecovery] Mission: " + active.vesselName + " parts=" + family.Count
@@ -354,19 +357,19 @@ namespace BoosterWatch
             {
                 if (v == null || v.id == originId || v == FlightGlobals.ActiveVessel || boosters.Any(b => b.Id == v.id)) continue;
                 string skip = null;
-                if (v.packed) skip = "nicht entpackt (packed)";
-                else if (v.LandedOrSplashed) skip = "gilt als gelandet oder gewassert";
-                else if (v.situation == Vessel.Situations.PRELAUNCH) skip = "noch vor dem Start";
-                else if (v.GetCrewCount() != 0) skip = "bemannt";
-                else if (!v.mainBody.isHomeWorld) skip = "nicht auf der Heimatwelt";
-                else if (v.parts.Any(p => p.flightID == originRoot)) skip = "enthaelt das Wurzelbauteil der Rakete";
-                else if (!v.parts.Any(p => family.Contains(p.flightID))) skip = "gehoert nicht zu dieser Rakete";
-                else if (v.parts.Any(p => failedParts.Contains(p.flightID))) skip = "bereits als Absturz vermerkt";
+                if (v.packed) skip = Loc.Get("#PSR_Skip_Packed");
+                else if (v.LandedOrSplashed) skip = Loc.Get("#PSR_Skip_Landed");
+                else if (v.situation == Vessel.Situations.PRELAUNCH) skip = Loc.Get("#PSR_Skip_Prelaunch");
+                else if (v.GetCrewCount() != 0) skip = Loc.Get("#PSR_Skip_Crewed");
+                else if (!v.mainBody.isHomeWorld) skip = Loc.Get("#PSR_Skip_NotHomeWorld");
+                else if (v.parts.Any(p => p.flightID == originRoot)) skip = Loc.Get("#PSR_Skip_RootPart");
+                else if (!v.parts.Any(p => family.Contains(p.flightID))) skip = Loc.Get("#PSR_Skip_NotThisRocket");
+                else if (v.parts.Any(p => failedParts.Contains(p.flightID))) skip = Loc.Get("#PSR_Skip_AlreadyCrashed");
                 else
                 {
                     JournalEntry old;
                     if (journal != null && journal.Entries.TryGetValue(v.id, out old) && old.Status != "Tracking")
-                        skip = "Bergungsjournal: " + old.Status;
+                        skip = Loc.Get("#PSR_Skip_Journal", Loc.Journal(old.Status));
                     else
                     {
                         bool chutes = v.parts.Any(p => p.FindModulesImplementing<ModuleParachute>().Count > 0);
@@ -374,14 +377,14 @@ namespace BoosterWatch
                             .Any(PoweredLanding.Suitable));
                         if (!chutes && !engine)
                             skip = settings.PoweredLanding
-                                ? "weder Fallschirme noch ein geeignetes Triebwerk"
-                                : "keine Fallschirme, und Triebwerkslandung ist ausgeschaltet";
+                                ? Loc.Get("#PSR_Skip_NoLandingMeans")
+                                : Loc.Get("#PSR_Skip_NoChutesAndOff");
                     }
                 }
                 if (skip != null) { ReportSkip(v, skip); continue; }
                 if (boosters.Count(b => !b.Finished) >= settings.MaxBoosters)
                 {
-                    notice = "Booster-Limit erreicht: " + settings.MaxBoosters + ". Weitere Stufen bleiben unveraendert.";
+                    notice = Loc.Get("#PSR_Notice_BoosterLimit", settings.MaxBoosters);
                     break;
                 }
                 AddBooster(v, true);
@@ -391,7 +394,7 @@ namespace BoosterWatch
         // One log line per rejected vessel and flight, plus a short hint in the window.
         private void ReportSkip(Vessel v, string reason)
         {
-            skipNotice = "Nicht erfasst: " + v.vesselName + " - " + reason + ".";
+            skipNotice = Loc.Get("#PSR_Notice_NotCaptured", v.vesselName, reason);
             if (!reportedSkips.Add(v.id)) return;
             Debug.Log("[PhysStageRecovery] Skip vessel=" + v.vesselName + " type=" + v.vesselType
                 + " situation=" + v.situation + " packed=" + v.packed + " landed=" + v.LandedOrSplashed
@@ -583,7 +586,7 @@ namespace BoosterWatch
                 entry.Funds = Funding.Instance != null ? Funding.Instance.Funds - fundsBefore : 0;
                 b.Status = "Aufgesetzt und geborgen"
                     + (entry.Funds > 0 ? " | +" + entry.Funds.ToString("N0") + " Funds" : "");
-                ScreenMessages.PostScreenMessage("PhysStageRecovery: " + b.Name + " geborgen", 5, ScreenMessageStyle.UPPER_CENTER);
+                ScreenMessages.PostScreenMessage(Loc.Get("#PSR_Screen_Recovered", b.Name), 5, ScreenMessageStyle.UPPER_CENTER);
                 Debug.Log("[PhysStageRecovery] Recovered " + b.Id + " groundContact=true"
                     + " clearance=" + b.Sample.Clearance
                     + " sink=" + b.Sample.Sink + " horizontal=" + b.Sample.Horizontal + " funds=" + entry.Funds);
@@ -652,7 +655,7 @@ namespace BoosterWatch
                 foreach (TrackedBooster b in boosters) b.Restore();
                 ReleaseWarp();
                 cameraFeed.Dispose();
-                notice = "Deaktiviert: Standard-Physikreichweite gilt wieder.";
+                notice = Loc.Get("#PSR_Notice_Deactivated");
             }
             else
             {

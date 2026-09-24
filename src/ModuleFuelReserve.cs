@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using UnityEngine;
 
@@ -32,8 +33,6 @@ namespace BoosterWatch
     public sealed class ModuleFuelReserve : PartModule
     {
         public const string ModuleName = "ModuleFuelReserve";
-        // What the engine itself shows in its menu while the reserve holds it back.
-        private const string ReachedStatus = "Lande-Vorhalt erreicht";
         // The menu text and the tank group are rebuilt at this rate. The trigger itself is checked
         // every physics tick, which only adds up numbers that are already in the tank objects.
         private const float RefreshSeconds = 0.5f;
@@ -59,7 +58,7 @@ namespace BoosterWatch
         public void ReleaseReserve()
         {
             if (!HighLogic.LoadedSceneIsFlight) return;
-            Release("von Hand");
+            Release("#PSR_Reserve_ReasonManual");
         }
 
         private readonly List<Part> ownTanks = new List<Part>();
@@ -77,6 +76,9 @@ namespace BoosterWatch
         private string engineName = "", releaseReason = "", stockMarkers = "";
         private double dryMass, isp, lockTime = double.NegativeInfinity, nextRelightNote = double.NegativeInfinity;
         private int tankCount, unstoppable, relights;
+        // Taken once from the language files: this string is written into the engine's own menu on
+        // every physics tick while the reserve holds, and the lookup has no business there.
+        private string reachedStatus = "";
         private bool setup, shuttable, locked, started, flew, faulted, textDirty = true, padWarned;
         private float nextRefresh = float.NegativeInfinity;
 
@@ -113,6 +115,17 @@ namespace BoosterWatch
                 percent.uiControlEditor.onFieldChanged = OnPercentChanged;
             if (percent != null && percent.uiControlFlight != null && percent.uiControlFlight.onFieldChanged == null)
                 percent.uiControlFlight.onFieldChanged = OnPercentChanged;
+            // The menu follows the player's language. The wording in the attributes is the German one
+            // and only ever shows if this never runs - KSP takes a module's field names from the
+            // attributes, which are compile-time constants and cannot carry a language lookup. The
+            // module's own heading is a private field that KSP fills from KSPModule and never
+            // localizes, so it is the one text that needs the field written directly.
+            RenameModule(Loc.Get("#PSR_Reserve_Module"));
+            reachedStatus = Loc.Get("#PSR_Reserve_Reached");
+            Rename("reservePercent", Loc.Get("#PSR_Reserve_Percent"));
+            Rename("reserveInfo", Loc.Get("#PSR_Reserve_Info"));
+            Rename("reserveStatus", Loc.Get("#PSR_Reserve_Status"));
+            if (Events["ReleaseReserve"] != null) Events["ReleaseReserve"].guiName = Loc.Get("#PSR_Reserve_Release");
             if (HighLogic.LoadedSceneIsEditor) reserveReleased = false;
             if (HighLogic.LoadedSceneIsFlight)
             {
@@ -140,6 +153,21 @@ namespace BoosterWatch
         {
             RefreshGroup();
             textDirty = true;
+        }
+
+        private void Rename(string field, string text)
+        {
+            BaseField target = Fields[field];
+            if (target != null) target.guiName = text;
+        }
+
+        private static FieldInfo moduleGuiName;
+        private void RenameModule(string text)
+        {
+            if (moduleGuiName == null)
+                moduleGuiName = typeof(PartModule).GetField("guiName",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            if (moduleGuiName != null) moduleGuiName.SetValue(this, text);
         }
 
         public override void OnStart(StartState state)
@@ -179,7 +207,7 @@ namespace BoosterWatch
         private void Fault(Exception e)
         {
             faulted = true;
-            reserveStatus = "Vorhalt gestoert (siehe KSP.log)";
+            reserveStatus = Loc.Get("#PSR_Reserve_Disturbed");
             Debug.LogError("[PhysStageRecovery] Lande-Vorhalt gestoert an " + (part == null ? "?" : part.name) + ": " + e);
         }
 
@@ -201,11 +229,11 @@ namespace BoosterWatch
                 // released instead: that reserve was not set for this flight, and one that snapped
                 // shut on a landing booster would kill the landing.
                 if (onGround) reserveReleased = false;
-                else if (vessel.verticalSpeed < -1) Release("schon im Sinkflug");
+                else if (vessel.verticalSpeed < -1) Release("#PSR_Reserve_ReasonDescending");
             }
             if (!onGround) flew = true;
-            if (startVessel != vessel) Release("Stufentrennung");
-            else if (flew && onGround) Release("aufgesetzt");
+            if (startVessel != vessel) Release("#PSR_Reserve_ReasonSeparation");
+            else if (flew && onGround) Release("#PSR_Reserve_ReasonGround");
 
             ReadAmounts();
             bool canHold = shuttable && reservePercent > 0 && !reserveReleased && FuelReserve.HasTanks(stocks);
@@ -428,7 +456,7 @@ namespace BoosterWatch
                     }
                 }
                 // The menu line of the engine itself says why it is dark.
-                if (!engine.flameout) engine.Flameout(ReachedStatus, false, true);
+                if (!engine.flameout) engine.Flameout(reachedStatus, false, true);
                 engine.engineShutdown = true;
             }
         }
@@ -519,29 +547,31 @@ namespace BoosterWatch
                 + " Rest=" + FuelReserve.ShareText(FuelReserve.RemainingShare(stocks)));
         }
 
+        // reason is a language tag: the release shows up in the menu and in the log, and both read the
+        // player's language. On a German installation both carry exactly the wording they always had.
         private void Release(string reason)
         {
             bool wasLocked = locked;
-            releaseReason = reason;
-            LetGo(reason);
+            releaseReason = Loc.Get(reason);
+            LetGo(releaseReason);
             if (reserveReleased && !wasLocked) return;
             reserveReleased = true;
             textDirty = true;
             Debug.Log("[PhysStageRecovery] Vorhalt freigegeben part=" + part.flightID + " " + engineName
-                + " Grund=" + reason + " Rest=" + FuelReserve.ShareText(FuelReserve.RemainingShare(stocks))
+                + " Grund=" + releaseReason + " Rest=" + FuelReserve.ShareText(FuelReserve.RemainingShare(stocks))
                 + " - der Treibstoff steht der Landung zur Verfuegung");
         }
 
         private void OnPartDeCouple(Vessel first, Vessel second)
         {
             if (faulted || !HighLogic.LoadedSceneIsFlight || part == null || part.vessel == null) return;
-            if (startVessel != null && part.vessel != startVessel) Release("Stufentrennung");
+            if (startVessel != null && part.vessel != startVessel) Release("#PSR_Reserve_ReasonSeparation");
         }
 
         private void OnVesselModified(Vessel vessel)
         {
             if (faulted || !HighLogic.LoadedSceneIsFlight || part == null || part.vessel == null) return;
-            if (startVessel != null && part.vessel != startVessel) Release("Stufentrennung");
+            if (startVessel != null && part.vessel != startVessel) Release("#PSR_Reserve_ReasonSeparation");
         }
 
         // --- Menu ---------------------------------------------------------------------------------
@@ -569,16 +599,16 @@ namespace BoosterWatch
             Fields["reserveInfo"].guiActiveEditor = true;
             StringBuilder text = new StringBuilder();
             text.Append(FuelReserve.PercentText(percent)).Append(" = ");
-            if (!FuelReserve.HasTanks(stocks)) text.Append("kein Tank am Triebwerk");
+            if (!FuelReserve.HasTanks(stocks)) text.Append(Loc.Get("#PSR_Reserve_NoTank"));
             else
             {
                 double mass = FuelReserve.ReserveMass(stocks, percent);
-                text.Append(FuelReserve.MassText(mass)).Append(" aus ").Append(tankCount)
-                    .Append(tankCount == 1 ? " Tank" : " Tanks");
+                text.Append(Loc.Get("#PSR_Reserve_FromTanks", FuelReserve.MassText(mass), tankCount,
+                    Loc.Get(tankCount == 1 ? "#PSR_Reserve_Tank" : "#PSR_Reserve_Tanks")));
                 double deltaV = FuelReserve.IdealDeltaV(dryMass, mass, isp);
-                if (deltaV > 0) text.Append(", ca. ").Append(FuelReserve.SpeedText(deltaV));
+                if (deltaV > 0) text.Append(Loc.Get("#PSR_Reserve_Approx", FuelReserve.SpeedText(deltaV)));
             }
-            if (!shuttable) text.Append(" - Triebwerk nicht abschaltbar");
+            if (!shuttable) text.Append(" - ").Append(Loc.Get("#PSR_Reserve_NoShutdown"));
             reserveInfo = text.ToString();
 
             if (!flight)
@@ -591,14 +621,13 @@ namespace BoosterWatch
             Events["ReleaseReserve"].guiActive = !reserveReleased;
             string share = FuelReserve.ShareText(FuelReserve.RemainingShare(stocks));
             if (reserveReleased)
-                reserveStatus = "freigegeben (" + releaseReason + "), Rest " + share;
-            else if (!shuttable) reserveStatus = "Triebwerk nicht abschaltbar, kein Vorhalt";
-            else if (!FuelReserve.HasTanks(stocks)) reserveStatus = "kein Tank am Triebwerk, kein Vorhalt";
+                reserveStatus = Loc.Get("#PSR_Reserve_Released", releaseReason, share);
+            else if (!shuttable) reserveStatus = Loc.Get("#PSR_Reserve_NoShutdownNoReserve");
+            else if (!FuelReserve.HasTanks(stocks)) reserveStatus = Loc.Get("#PSR_Reserve_NoTankNoReserve");
             else if (locked)
-                reserveStatus = "VORHALT ERREICHT: " + held.Count + " Triebwerk(e) aus, Rest " + share
-                    + " (Grenze " + FuelReserve.PercentText(percent) + ")"
-                    + (relights > 0 ? ", " + relights + "x erneut abgeschaltet" : "");
-            else reserveStatus = "aktiv: Rest " + share + " (Grenze " + FuelReserve.PercentText(percent) + ")";
+                reserveStatus = Loc.Get("#PSR_Reserve_Held", held.Count, share, FuelReserve.PercentText(percent))
+                    + (relights > 0 ? Loc.Get("#PSR_Reserve_HeldRelight", relights) : "");
+            else reserveStatus = Loc.Get("#PSR_Reserve_Active", share, FuelReserve.PercentText(percent));
             Fields["reserveStatus"].guiActive = true;
         }
 

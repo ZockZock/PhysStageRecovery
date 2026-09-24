@@ -13,9 +13,12 @@ namespace BoosterWatch
         private static Harmony harmony;
         private static Func<bool> tracking;
         private static float nextNotice;
-        public static void Install(Func<bool> keepPhysics)
+        // Handed in already worded: the guard itself knows nothing about languages, which keeps it
+        // testable without KSP's text system.
+        private static string notice = "";
+        public static void Install(Func<bool> keepPhysics, string message)
         {
-            Remove(); tracking = keepPhysics; harmony = new Harmony(Id);
+            Remove(); tracking = keepPhysics; notice = message; harmony = new Harmony(Id);
             Patch("setRate", "BeforeRate"); Patch("setMode", "BeforeMode");
             Patch("assumeWarpRate", "BeforeAssumeRate");
         }
@@ -36,7 +39,7 @@ namespace BoosterWatch
         {
             if (Time.unscaledTime < nextNotice) return;
             nextNotice = Time.unscaledTime + 3;
-            ScreenMessages.PostScreenMessage("PhysStageRecovery: Physikwarp ist frei; normaler Zeitraffer wartet auf die Booster.", 3, ScreenMessageStyle.UPPER_CENTER);
+            ScreenMessages.PostScreenMessage(notice, 3, ScreenMessageStyle.UPPER_CENTER);
         }
         public static bool BeforeRate(TimeWarp __instance, int __0, ref bool __result)
         {

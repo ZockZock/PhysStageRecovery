@@ -8,7 +8,7 @@ $target = [IO.Path]::GetFullPath((Join-Path $gameData 'PhysStageRecovery'))
 $legacy = [IO.Path]::GetFullPath((Join-Path $gameData 'BoosterWatch'))
 if ($target -ne "$gameData\PhysStageRecovery" -or $legacy -ne "$gameData\BoosterWatch") { throw 'Unerwarteter Installationspfad.' }
 $source = Join-Path $PSScriptRoot 'dist\GameData\PhysStageRecovery'
-foreach ($relative in @('Plugins\PhysStageRecovery.dll','PhysStageRecovery.version','README.md','LICENSE','THIRD_PARTY.md','PhysStageRecovery-Source.zip','PluginData\settings.default.cfg')) {
+foreach ($relative in @('Plugins\PhysStageRecovery.dll','PhysStageRecovery.version','README.md','LICENSE','THIRD_PARTY.md','PhysStageRecovery-Source.zip','PluginData\settings.default.cfg','Localization\en-us.cfg','Localization\de-de.cfg')) {
     if (!(Test-Path -LiteralPath (Join-Path $source $relative))) { throw "Paket unvollständig: $relative. Zuerst build.ps1 ausführen." }
 }
 if ((Test-Path -LiteralPath $target) -and !(Test-Path -LiteralPath (Join-Path $target 'PhysStageRecovery.version'))) { throw 'Unbekannter Zielordner wird nicht überschrieben.' }
@@ -19,7 +19,7 @@ if (!$backup.StartsWith($backupRoot + '\', [StringComparison]::OrdinalIgnoreCase
 New-Item -ItemType Directory -Path $backup -Force | Out-Null
 $dll = Join-Path $target 'Plugins\PhysStageRecovery.dll'
 if (Test-Path -LiteralPath $dll) { Copy-Item -LiteralPath $dll -Destination $backup }
-New-Item -ItemType Directory -Path (Join-Path $target 'Plugins'),(Join-Path $target 'PluginData') -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $target 'Plugins'),(Join-Path $target 'PluginData'),(Join-Path $target 'Localization') -Force | Out-Null
 $config = Join-Path $target 'PluginData\settings.cfg'
 if (!(Test-Path -LiteralPath $config)) {
     $oldConfig = Join-Path $legacy 'PluginData\settings.cfg'
@@ -30,6 +30,9 @@ $sourceDll = Join-Path $source 'Plugins\PhysStageRecovery.dll'
 Copy-Item -LiteralPath $sourceDll -Destination $dll -Force
 foreach ($name in @('PhysStageRecovery.version','README.md','LICENSE','THIRD_PARTY.md','PhysStageRecovery-Source.zip')) {
     Copy-Item -LiteralPath (Join-Path $source $name) -Destination (Join-Path $target $name) -Force
+}
+foreach ($name in @('en-us.cfg','de-de.cfg')) {
+    Copy-Item -LiteralPath (Join-Path $source ('Localization\' + $name)) -Destination (Join-Path $target 'Localization') -Force
 }
 if ((Get-FileHash -LiteralPath $sourceDll).Hash -ne (Get-FileHash -LiteralPath $dll).Hash) { throw 'Installierte DLL stimmt nicht mit dem Build überein.' }
 if (Test-Path -LiteralPath $legacy) {

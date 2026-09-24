@@ -8,6 +8,9 @@ if (!(Test-Path -LiteralPath $compiler)) { throw 'Roslyn-C#-Compiler nicht gefun
 $outputDir = Join-Path $projectRoot 'dist\GameData\PhysStageRecovery\Plugins'
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path (Split-Path $outputDir) 'PluginData') -Force | Out-Null
+# The language files sit next to the DLL, where KSP's Localizer looks for a mod's Localization node.
+New-Item -ItemType Directory -Path (Join-Path (Split-Path $outputDir) 'Localization') -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $projectRoot 'packaging/Localization/en-us.cfg'),(Join-Path $projectRoot 'packaging/Localization/de-de.cfg') -Destination (Join-Path (Split-Path $outputDir) 'Localization') -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'packaging/PhysStageRecovery.version') -Destination (Split-Path $outputDir) -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'packaging/settings.default.cfg') -Destination (Join-Path (Split-Path $outputDir) 'PluginData') -Force
 $refs = @('Assembly-CSharp','Assembly-CSharp-firstpass','UnityEngine','UnityEngine.CoreModule','UnityEngine.IMGUIModule','UnityEngine.InputLegacyModule','UnityEngine.PhysicsModule','UnityEngine.UIModule','UnityEngine.UI','UnityEngine.AnimationModule','UnityEngine.TextRenderingModule')

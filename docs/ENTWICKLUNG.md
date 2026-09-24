@@ -7,11 +7,38 @@ Tags, die Ordner unter `build/backups/` bleiben als physische Kopie daneben best
 
 Versioniert sind `src/`, `tests/`, `tools/`, `packaging/`, `docs/` und die Skripte
 `build.ps1`, `test.ps1`, `install.ps1` samt `BoosterWatch.csproj`, `README.md`,
-`THIRD_PARTY.md` und `LICENSE` — 75 Dateien.
+`THIRD_PARTY.md` und `LICENSE` — 88 Dateien.
 
 Nicht versioniert (siehe `.gitignore`): `build/` (Prüfstands-Binaries, Schnappschüsse),
 `dist/` (Bauausgabe), die ausgelieferten `*.zip`-Archive und die `SHA256SUMS.txt` der
 Schnappschüsse. Das installierte Binary in KSP ist ohnehin kein Quelltext.
+
+## Texte und Sprachen
+
+Seit 0.9.32 steht **kein sichtbarer Text mehr im Quelltext**. Ein neuer Text gehört an drei
+Orte, und `tests/LocalizationTests.cs` prüft sie gegeneinander:
+
+| Ort | Wofür |
+|---|---|
+| `src/LocalizationTable.cs` | englischer Wortlaut, fest in der DLL — das Netz, wenn der `Localization`-Ordner fehlt |
+| `packaging/Localization/en-us.cfg` | derselbe englische Text für KSPs eigene Suche und als Vorlage für neue Sprachen |
+| `packaging/Localization/de-de.cfg` | die deutsche Fassung |
+
+Im Code liest man ihn über `Loc.Get("#PSR_…")`, mit `<<1>>`, `<<2>>` für Werte. Zwölf Prüfungen
+laufen bei jedem `.\test.ps1`: gleicher englischer Wortlaut in Tabelle und Datei, keine Waise,
+gleiche Platzhalter in beiden Sprachen, keine Leerzeichen an den Rändern (die schneidet der
+Config-Parser ab) und **jeder in `src/` benutzte Tag hat einen Text**.
+
+Englisch in der DLL und in `en-us.cfg` ist Absicht: KSPs `RefreshTagValues()` legt zuerst `en-us`
+aus allen Dateien an und dann die eingestellte Sprache darüber. Ohne `en-us.cfg` fiele jede nicht
+übersetzte Sprache auf rohe Tags zurück. Nicht übersetzen: Flugschreiber-Spalten und die reinen
+Diagnosezeilen — ein Log und eine CSV sollen in jeder Sprache gleich gelesen werden können.
+
+Beim Start steht die Kontrolle in `KSP.log`:
+
+```
+[PhysStageRecovery] Sprache 'de-de': 125 Texte, davon 121 uebersetzt und 4 wie im englischen Ersatz, 0 fehlend.
+```
 
 ## Die Baselines
 

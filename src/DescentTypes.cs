@@ -138,5 +138,23 @@ namespace BoosterWatch.Guidance
                 default: return "Bereit";
             }
         }
+
+        // The same phase for the window. Name() keeps its German wording because the flight recorder
+        // writes it into the CSV, where a column that changes with the game language would break every
+        // comparison; the window asks for the tag and gets the player's language.
+        public static string Tag(DescentPhase phase)
+        {
+            switch (phase)
+            {
+                case DescentPhase.Align: return "#PSR_Phase_Align";
+                case DescentPhase.Entry: return "#PSR_Phase_Entry";
+                case DescentPhase.Burn: return "#PSR_Phase_Burn";
+                case DescentPhase.Terminal: return "#PSR_Phase_Terminal";
+                case DescentPhase.Touchdown: return "#PSR_Phase_Touchdown";
+                case DescentPhase.Done: return "#PSR_Phase_Done";
+                case DescentPhase.Abort: return "#PSR_Phase_Abort";
+                default: return "#PSR_Phase_Ready";
+            }
+        }
     }
 }

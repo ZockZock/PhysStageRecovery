@@ -29,7 +29,7 @@ class RailWarpGuardTests
     {
         bool tracking = false;
         TimeWarp warp = new TimeWarp();
-        RailWarpGuard.Install(() => tracking);
+        RailWarpGuard.Install(() => tracking, "notice");
         Check(warp.Rate(2) && TimeWarp.CurrentRate == 20, "Normal warp is unchanged with no tracked boosters");
         warp.Rate(0); tracking = true;
         Check(!warp.Rate(2) && TimeWarp.CurrentRate == 1, "On-rails warp is rejected before changing the rate");

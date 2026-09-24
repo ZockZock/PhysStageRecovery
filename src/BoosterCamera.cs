@@ -62,7 +62,7 @@ namespace BoosterWatch
             }
             catch (Exception e)
             {
-                Error = "Kamera nicht verfuegbar; Physik laeuft weiter.";
+                Error = Loc.Get("#PSR_Camera_Unavailable");
                 Debug.LogError("[PhysStageRecovery] Camera disabled: " + e);
                 Dispose();
             }

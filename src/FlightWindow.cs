@@ -13,38 +13,41 @@ namespace BoosterWatch
         {
             float w = window.width - 36;
             GUI.Label(new Rect(18, 12, w - 120, 30), "PhysStageRecovery", windowTheme.Title);
-            GUI.Label(new Rect(window.width - 125, 17, 60, 22), "0.9.31", windowTheme.Small);
-            if (GUI.Button(new Rect(window.width - 48, 14, 30, 28), new GUIContent("×", "Fenster schließen"), windowTheme.Button)) SetVisible(false);
-            GUI.Label(new Rect(19, 44, w, 20), "STUFEN LANDEN. MISSION FORTSETZEN.", windowTheme.Small);
+            GUI.Label(new Rect(window.width - 125, 17, 60, 22), "0.9.32", windowTheme.Small);
+            if (GUI.Button(new Rect(window.width - 48, 14, 30, 28), new GUIContent("×", Loc.Get("#PSR_Window_Close")), windowTheme.Button)) SetVisible(false);
+            GUI.Label(new Rect(19, 44, w, 20), Loc.Get("#PSR_Window_Tagline"), windowTheme.Small);
 
-            bool mod = Switch(new Rect(18, 77, 147, 30), "Mod", enabledMod);
+            bool mod = Switch(new Rect(18, 77, 147, 30), Loc.Get("#PSR_Window_Mod"), enabledMod);
             if (mod != enabledMod) ToggleMod(mod);
-            bool recovery = Switch(new Rect(177, 77, 176, 30), "Auto-Bergung", autoRecovery);
+            bool recovery = Switch(new Rect(177, 77, 176, 30), Loc.Get("#PSR_Window_AutoRecovery"), autoRecovery);
             if (recovery != autoRecovery)
             {
                 autoRecovery = recovery; settings.SetBehavior(enabledMod, autoRecovery); settings.Save();
                 if (RecoveryJournal.Instance != null) RecoveryJournal.Instance.AutoRecovery = autoRecovery;
             }
             if (window.width >= 620)
-                GUI.Label(new Rect(375, 77, window.width - 393, 30), faulted ? "FEHLER" : boosters.Count(b => !b.Finished) + " IN VERFOLGUNG", windowTheme.Badge);
+                GUI.Label(new Rect(375, 77, window.width - 393, 30),
+                    faulted ? Loc.Get("#PSR_Window_Fault") : Loc.Get("#PSR_Window_Tracked", boosters.Count(b => !b.Finished)),
+                    windowTheme.Badge);
 
             float tabWidth = (w - 8) / 2;
-            if (GUI.Button(new Rect(18, 121, tabWidth, 32), "Flugübersicht", settingsOpen ? windowTheme.Tab : windowTheme.ActiveTab))
+            if (GUI.Button(new Rect(18, 121, tabWidth, 32), Loc.Get("#PSR_Window_TabOverview"), settingsOpen ? windowTheme.Tab : windowTheme.ActiveTab))
             { settingsOpen = false; GUI.FocusControl(null); }
-            if (GUI.Button(new Rect(26 + tabWidth, 121, tabWidth, 32), "Einstellungen", settingsOpen ? windowTheme.ActiveTab : windowTheme.Tab))
+            if (GUI.Button(new Rect(26 + tabWidth, 121, tabWidth, 32), Loc.Get("#PSR_Window_TabSettings"), settingsOpen ? windowTheme.ActiveTab : windowTheme.Tab))
             { settingsOpen = true; GUI.FocusControl(null); }
             cameraViewport = new Rect();
             if (settingsOpen) DrawSettings(); else DrawOverview();
 
             GUI.Label(new Rect(20, window.height - 30, w - 100, 20),
-                (settings.PhysicsRange / 1000).ToString("0") + " km Reichweite  ·  Bergung bei Bodenkontakt", windowTheme.Small);
+                Loc.Get("#PSR_Window_Footer", (settings.PhysicsRange / 1000).ToString("0")), windowTheme.Small);
             GUI.Label(new Rect(window.width - 96, window.height - 30, 56, 20), "Alt + B", windowTheme.Small);
             GUI.Label(new Rect(window.width - 23, window.height - 23, 18, 18), "◢", windowTheme.Muted);
             GUI.DragWindow(new Rect(0, 0, window.width - 55, 67));
         }
         private bool Switch(Rect rect, string label, bool value)
         {
-            return GUI.Button(rect, label + (value ? "  ·  AN" : "  ·  AUS"), value ? windowTheme.ActiveButton : windowTheme.Button) ? !value : value;
+            string state = Loc.Get(value ? "#PSR_Window_On" : "#PSR_Window_Off");
+            return GUI.Button(rect, label + "  ·  " + state, value ? windowTheme.ActiveButton : windowTheme.Button) ? !value : value;
         }
         private void DrawOverview()
         {
@@ -54,10 +57,11 @@ namespace BoosterWatch
                 Rect empty = new Rect(18, 168, w, window.height - 212);
                 GUI.Box(empty, "", windowTheme.Panel);
                 float emptyY = empty.y + Mathf.Max(24, (empty.height - 180) / 2);
-                GUI.Label(new Rect(38, emptyY, w - 40, 32), faulted ? "Verfolgung angehalten" : enabledMod ? "Bereit für die nächste Stufe" : "Mod ist ausgeschaltet", windowTheme.Heading);
+                GUI.Label(new Rect(38, emptyY, w - 40, 32), faulted ? Loc.Get("#PSR_Status_TrackingStopped")
+                    : enabledMod ? Loc.Get("#PSR_Window_Ready") : Loc.Get("#PSR_Window_ModOff"), windowTheme.Heading);
                 GUI.Label(new Rect(38, emptyY + 44, w - 40, 62), faulted ? notice :
-                    "Sobald sich ein Booster mit Fallschirmen oder nutzbarem Landetriebwerk trennt, öffnet sich dieses Fenster automatisch.", windowTheme.Body);
-                GUI.Label(new Rect(38, emptyY + 117, w - 40, 50), initialized ? notice : "Du steuerst deine Rakete. Wir verfolgen die abgetrennten Stufen.", windowTheme.Muted);
+                    Loc.Get("#PSR_Window_EmptyHint"), windowTheme.Body);
+                GUI.Label(new Rect(38, emptyY + 117, w - 40, 50), initialized ? notice : Loc.Get("#PSR_Window_FlyingHint"), windowTheme.Muted);
                 return;
             }
             TrackedBooster b = boosters[Mathf.Clamp(selection, 0, boosters.Count - 1)];
@@ -72,8 +76,10 @@ namespace BoosterWatch
             bool live = b.Vessel != null && b.Vessel.loaded && !b.Vessel.packed && !b.Finished;
             if (cameraEnabled && cameraFeed.Texture != null && cameraFeed.HasFrame && (live || b.Finished))
                 GUI.DrawTexture(cameraViewport, cameraFeed.Texture, ScaleMode.ScaleToFit, false);
-            string overlay = faulted ? notice : b.Finished ? "VERFOLGUNG BEENDET" : !cameraEnabled ? "Kamera in settings.cfg deaktiviert"
-                : cameraFeed.Error ?? (!live ? "Warte auf Livebild" : cameraFeed.HasFrame ? "" : "Kamera wird verbunden …");
+            string overlay = faulted ? notice : b.Finished ? Loc.Get("#PSR_Window_TrackingDone")
+                : !cameraEnabled ? Loc.Get("#PSR_Window_CameraOff")
+                : cameraFeed.Error ?? (!live ? Loc.Get("#PSR_Window_WaitingVideo")
+                    : cameraFeed.HasFrame ? "" : Loc.Get("#PSR_Window_ConnectingCamera"));
             if (overlay.Length > 0)
             {
                 GUI.Box(new Rect(28, 220, w - 20, 42), "", windowTheme.Panel);
@@ -85,15 +91,15 @@ namespace BoosterWatch
             if (cameraEnabled && live && cameraViewport.Contains(mouse))
             {
                 GUI.Box(new Rect(28, cameraViewport.yMax - 34, w - 20, 26), "", windowTheme.Inset);
-                GUI.Label(new Rect(39, cameraViewport.yMax - 34, w - 42, 26), "Rechte Maustaste: drehen   ·   Mausrad: zoomen", windowTheme.Small);
+                GUI.Label(new Rect(39, cameraViewport.yMax - 34, w - 42, 26), Loc.Get("#PSR_Window_CameraHint"), windowTheme.Small);
             }
             float y = cameraViewport.yMax + 12, card = narrow ? (w - 10) / 2 : (w - 30) / 4;
-            Metric(new Rect(18, y, card, 63), "BODENABSTAND", Number(b.Sample.Clearance, " m"));
+            Metric(new Rect(18, y, card, 63), Loc.Get("#PSR_Metric_Clearance"), Number(b.Sample.Clearance, " m"));
             bool validReadout = b.Sample.PhysicsActive || b.Finished;
-            Metric(new Rect(28 + card, y, card, 63), "SURFACE SPEED",
+            Metric(new Rect(28 + card, y, card, 63), Loc.Get("#PSR_Metric_SurfaceSpeed"),
                 Number(validReadout ? b.Readout.SurfaceSpeed : double.NaN, " m/s"));
             Metric(new Rect(narrow ? 18 : 38 + 2 * card, narrow ? y + 73 : y, card, 63),
-                "ENTFERNUNG", Number(b.Distance / 1000, " km"));
+                Loc.Get("#PSR_Metric_Distance"), Number(b.Distance / 1000, " km"));
             FuelMetric(new Rect(narrow ? 28 + card : 48 + 3 * card, narrow ? y + 73 : y, card, 63),
                 validReadout ? b.Readout.FuelFraction : double.NaN,
                 validReadout ? b.Readout.RemainingDeltaV : double.NaN);
@@ -101,12 +107,12 @@ namespace BoosterWatch
             string state = PrimaryStatus(b);
             if (!faulted && enabledMod && !b.Finished && b.Sample.PhysicsActive
                 && b.Landing.OwnsControl && b.Landing.Predictive)
-                state = Guidance.DescentPhases.Name(b.Landing.Phase);
-            GUI.Label(new Rect(20, y, w - 155, 28), new GUIContent("Zustand: " + state, state), windowTheme.Heading);
+                state = Loc.Get(Guidance.DescentPhases.Tag(b.Landing.Phase));
+            GUI.Label(new Rect(20, y, w - 155, 28), new GUIContent(Loc.Get("#PSR_Window_State", state), state), windowTheme.Heading);
             double throttle = b.Finished ? 0 : validReadout ? b.Readout.Throttle : double.NaN;
             GUI.Label(new Rect(window.width - 166, y, 146, 28), new GUIContent(
-                "Schub " + (RecoveryPolicy.Finite(throttle) ? (100 * throttle).ToString("0") : "—") + " %",
-                "Angewandte Drosselstellung nach der Schubsperre"), windowTheme.Heading);
+                Loc.Get("#PSR_Window_Throttle", RecoveryPolicy.Finite(throttle) ? (100 * throttle).ToString("0") : "—"),
+                Loc.Get("#PSR_Window_ThrottleHint")), windowTheme.Heading);
         }
         private void Metric(Rect rect, string label, string value)
         {
@@ -118,31 +124,31 @@ namespace BoosterWatch
         private void FuelMetric(Rect rect, double fraction, double deltaV)
         {
             GUI.Box(rect, "", windowTheme.Panel);
-            GUI.Label(new Rect(rect.x + 12, rect.y + 5, rect.width - 24, 18), "REST-Δv", windowTheme.Small);
+            GUI.Label(new Rect(rect.x + 12, rect.y + 5, rect.width - 24, 18), Loc.Get("#PSR_Metric_RemainingDv"), windowTheme.Small);
             string value = RecoveryPolicy.Finite(deltaV) ? deltaV.ToString("N0", CultureInfo.CurrentCulture) + " m/s" : "—";
             GUIStyle style = windowTheme.Value.CalcSize(new GUIContent(value)).x > rect.width - 24
                 ? windowTheme.CompactValue : windowTheme.Value;
             GUI.Label(new Rect(rect.x + 12, rect.y + 22, rect.width - 24, 27),
-                new GUIContent(value, "Verbleibendes Δv im Vakuum für die Landetriebwerke"), style);
+                new GUIContent(value, Loc.Get("#PSR_Metric_RemainingDvHint")), style);
             Rect bar = new Rect(rect.x + 12, rect.y + 53, rect.width - 24, 6);
             GUI.Box(bar, "", windowTheme.FuelTrack);
             if (RecoveryPolicy.Finite(fraction) && fraction > 0)
                 GUI.Box(new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01((float)fraction), bar.height), "",
                     fraction < 0.15 ? windowTheme.FuelLow : windowTheme.FuelFill);
             GUI.Label(bar, new GUIContent("", RecoveryPolicy.Finite(fraction)
-                ? "Landetreibstoff: " + (100 * fraction).ToString("0") + " % der Tankkapazität"
-                : "Kein Tankfüllstand verfügbar"), windowTheme.Small);
+                ? Loc.Get("#PSR_Metric_Fuel", (100 * fraction).ToString("0"))
+                : Loc.Get("#PSR_Metric_FuelUnknown")), windowTheme.Small);
         }
 
         private string PrimaryStatus(TrackedBooster b)        {
-            if (faulted) return "Verfolgung angehalten";
-            if (b.Finished) return b.ImpactFailed ? "Landung fehlgeschlagen" : "Verfolgung abgeschlossen";
-            if (!enabledMod) return "Mod ausgeschaltet";
-            if (!b.Sample.PhysicsActive) return "Warte auf Simulation";
-            if (b.Sample.Sink < 0) return "Steigflug";
-            if (b.Landing.InFinalDescent) return "Endanflug";
-            if (b.OpenChutes > 0) return "Fallschirmlandung";
-            return b.Landing.OwnsControl ? "Triebwerkslandung" : "Sinkflug wird verfolgt";
+            if (faulted) return Loc.Get("#PSR_Status_TrackingStopped");
+            if (b.Finished) return b.ImpactFailed ? Loc.Get("#PSR_Status_LandingFailed") : Loc.Get("#PSR_Status_TrackingFinished");
+            if (!enabledMod) return Loc.Get("#PSR_Status_ModOff");
+            if (!b.Sample.PhysicsActive) return Loc.Get("#PSR_Status_WaitingSimulation");
+            if (b.Sample.Sink < 0) return Loc.Get("#PSR_Status_Climbing");
+            if (b.Landing.InFinalDescent) return Loc.Get("#PSR_Status_FinalApproach");
+            if (b.OpenChutes > 0) return Loc.Get("#PSR_Status_ChuteLanding");
+            return b.Landing.OwnsControl ? Loc.Get("#PSR_Status_PoweredLanding") : Loc.Get("#PSR_Status_DescentTracked");
         }
         private void DrawSettings()
         {
@@ -152,27 +158,31 @@ namespace BoosterWatch
             bool wide = contentWidth >= 760;
             float contentHeight = wide ? 406 : 620;
             settingsScroll = GUI.BeginScrollView(viewport, settingsScroll, new Rect(0, 0, contentWidth, contentHeight));
-            SettingsCard(new Rect(0, 0, contentWidth, 128), "Verfolgung", "Reichweite für abgetrennte Stufen");
-            rangeInput = SettingField(0, 74, contentWidth, "Physikreichweite", rangeInput, "km", "5–2000 km", "BWRange");
+            SettingsCard(new Rect(0, 0, contentWidth, 128), Loc.Get("#PSR_Settings_Tracking"), Loc.Get("#PSR_Settings_TrackingHint"));
+            rangeInput = SettingField(0, 74, contentWidth, Loc.Get("#PSR_Settings_Range"), rangeInput, "km",
+                Loc.Get("#PSR_Settings_RangeHint"), "BWRange");
             float col = wide ? (contentWidth - 14) / 2 : contentWidth;
-            SettingsCard(new Rect(0, 142, col, 214), "Autostaging", "Stufen im Sinkflug automatisch auslösen");
-            autoStageInput = Switch(new Rect(16, 203, col - 32, 30), "Autostaging", autoStageInput);
+            SettingsCard(new Rect(0, 142, col, 214), Loc.Get("#PSR_Settings_AutoStage"), Loc.Get("#PSR_Settings_AutoStageHint"));
+            autoStageInput = Switch(new Rect(16, 203, col - 32, 30), Loc.Get("#PSR_Settings_AutoStage"), autoStageInput);
             bool enabled = GUI.enabled; GUI.enabled = enabled && autoStageInput;
-            stageHeightInput = SettingField(0, 246, col, "Auslösehöhe", stageHeightInput, "m", "50–70000 m über Grund", "BWStageHeight");
-            lastStageInput = SettingField(0, 293, col, "Letzte Stufe", lastStageInput, "", "0–100, einschließlich", "BWLastStage");
+            stageHeightInput = SettingField(0, 246, col, Loc.Get("#PSR_Settings_StageHeight"), stageHeightInput, "m",
+                Loc.Get("#PSR_Settings_StageHeightHint"), "BWStageHeight");
+            lastStageInput = SettingField(0, 293, col, Loc.Get("#PSR_Settings_LastStage"), lastStageInput, "",
+                Loc.Get("#PSR_Settings_LastStageHint"), "BWLastStage");
             GUI.enabled = enabled;
             float x = wide ? col + 14 : 0, y = wide ? 142 : 370;
-            SettingsCard(new Rect(x, y, col, 236), "Triebwerkslandung", "Automatischer Anflug und Bodenkontakt");
-            poweredInput = Switch(new Rect(x + 16, y + 61, col - 32, 30), "Landeautomat", poweredInput);
+            SettingsCard(new Rect(x, y, col, 236), Loc.Get("#PSR_Settings_Powered"), Loc.Get("#PSR_Settings_PoweredHint"));
+            poweredInput = Switch(new Rect(x + 16, y + 61, col - 32, 30), Loc.Get("#PSR_Settings_PoweredToggle"), poweredInput);
             GUI.enabled = enabled && poweredInput;
-            landingSpeedInput = SettingField(x, y + 105, col, "Ziel-Sinken", landingSpeedInput, "m/s", "0,5–5 m/s", "BWLandingSpeed");
+            landingSpeedInput = SettingField(x, y + 105, col, Loc.Get("#PSR_Settings_LandingSpeed"), landingSpeedInput, "m/s",
+                Loc.Get("#PSR_Settings_LandingSpeedHint"), "BWLandingSpeed");
             GUI.enabled = enabled;
-            chuteHeightInput = SettingField(x, y + 149, col, "Schirmhöhe", chuteHeightInput, "m",
-                "100–20000 m über Grund", "BWChuteHeight");
+            chuteHeightInput = SettingField(x, y + 149, col, Loc.Get("#PSR_Settings_ChuteHeight"), chuteHeightInput, "m",
+                Loc.Get("#PSR_Settings_ChuteHeightHint"), "BWChuteHeight");
             GUI.EndScrollView();
-            GUI.Label(new Rect(20, window.height - 96, w - 171, 47), settingsMessage.Length > 0 ? settingsMessage : "Änderungen gelten für alle verfolgten Stufen.", windowTheme.Muted);
-            if (GUI.Button(new Rect(window.width - 181, window.height - 94, 163, 36), "Speichern", windowTheme.ActiveButton)) ApplySettings();
-            if (settings.ShowDiagnostics && GUI.Button(new Rect(20, window.height - 62, 155, 24), "Diagnose protokollieren", windowTheme.Button)) LogDiagnostics();
+            GUI.Label(new Rect(20, window.height - 96, w - 171, 47), settingsMessage.Length > 0 ? settingsMessage : Loc.Get("#PSR_Settings_Footer"), windowTheme.Muted);
+            if (GUI.Button(new Rect(window.width - 181, window.height - 94, 163, 36), Loc.Get("#PSR_Settings_Save"), windowTheme.ActiveButton)) ApplySettings();
+            if (settings.ShowDiagnostics && GUI.Button(new Rect(20, window.height - 62, 155, 24), Loc.Get("#PSR_Settings_Diagnostics"), windowTheme.Button)) LogDiagnostics();
         }
         private void SettingsCard(Rect rect, string title, string subtitle)
         {
@@ -195,7 +205,7 @@ namespace BoosterWatch
             if (!ParseSetting(rangeInput, 5, 2000, out range) || !ParseSetting(stageHeightInput, 50, 70000, out altitude)
                 || !int.TryParse(lastStageInput, out stage) || stage < 0 || stage > 100 || !ParseSetting(landingSpeedInput, 0.5, 5, out speed)
                 || !ParseSetting(chuteHeightInput, 100, 20000, out chute))
-            { settingsMessage = "Bitte die angegebenen Zahlenbereiche beachten."; return; }
+            { settingsMessage = Loc.Get("#PSR_Settings_RangeError"); return; }
             float oldRange = settings.PhysicsRange;
             bool oldAuto = settings.AutoStage, oldPowered = settings.PoweredLanding;
             double oldAltitude = settings.AutoStageHeight, oldSpeed = settings.LandingSpeed, oldChute = settings.ChuteHeight;
@@ -209,7 +219,7 @@ namespace BoosterWatch
                 settings.PhysicsRange = oldRange; settings.AutoStage = oldAuto; settings.AutoStageHeight = oldAltitude;
                 settings.LastAutoStage = oldStage; settings.PoweredLanding = oldPowered; settings.LandingSpeed = oldSpeed;
                 settings.ChuteHeight = oldChute;
-                settingsMessage = "Speichern fehlgeschlagen. Details stehen im KSP.log."; return;
+                settingsMessage = Loc.Get("#PSR_Settings_SaveFailed"); return;
             }
             foreach (TrackedBooster b in boosters)
             {
@@ -218,11 +228,10 @@ namespace BoosterWatch
                 if (oldPowered != settings.PoweredLanding || oldSpeed != settings.LandingSpeed)
                 { b.Policy.Reset(); b.Landing.Stop("Einstellungen geändert", false); }
             }
-            settingsMessage = "Gespeichert. Auf laufende Stufen angewendet."; GUI.FocusControl(null);
+            settingsMessage = Loc.Get("#PSR_Settings_Saved"); GUI.FocusControl(null);
         }
         private static bool ParseSetting(string input, double min, double max, out double value)
         { return double.TryParse(input.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out value)
             && RecoveryPolicy.Finite(value) && value >= min && value <= max; }
     }
 }
-
