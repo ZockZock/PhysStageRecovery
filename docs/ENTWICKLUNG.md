@@ -7,7 +7,7 @@ Tags, die Ordner unter `build/backups/` bleiben als physische Kopie daneben best
 
 Versioniert sind `src/`, `tests/`, `tools/`, `packaging/`, `docs/` und die Skripte
 `build.ps1`, `test.ps1`, `install.ps1` samt `BoosterWatch.csproj`, `README.md`,
-`THIRD_PARTY.md` und `LICENSE` — 93 Dateien.
+`THIRD_PARTY.md` und `LICENSE` — 95 Dateien.
 
 Nicht versioniert (siehe `.gitignore`): `build/` (Prüfstands-Binaries, Schnappschüsse),
 `dist/` (Bauausgabe), die ausgelieferten `*.zip`-Archive und die `SHA256SUMS.txt` der
@@ -68,6 +68,7 @@ git worktree add ..\BoosterWatch-v0.9.20 v0.9.20   # zweiter Ordner mit diesem S
 .\test.ps1        # muss durchlaufen (ein bekannter Rauschtest ist offen, siehe README)
 .\build.ps1
 .\install.ps1     # KSP muss geschlossen sein
+.\tools\install-when-closed.ps1   # Alternative: wartet, bis KSP beendet ist, und installiert dann
 
 git status        # was ist geändert?
 git diff          # was genau?
@@ -84,6 +85,12 @@ git tag -a v0.9.21 -m "Baseline 0.9.21 - <wofür sie steht>"
 Und die zugehörige Beschreibung als `docs/BASELINE-0.9.21.md` dazu — mit den Flugdaten,
 die den Stand belegen. Dieser Text ist später mehr wert als der Code selbst: Er sagt, womit
 eine Zahl gemessen wurde.
+
+Den physischen Schnappschuss legt `.\tools\snapshot.ps1 <version>` an: alle versionierten
+Dateien, die ausgelieferten Paketdateien aus `dist/` und eine `SHA256SUMS.txt`, die das
+Skript gleich selbst nachrechnet. Ein vorhandener Ordner wird mit
+`.\tools\snapshot.ps1 <version> <ordner>` neu befüllt — so kommt die Beschreibung noch hinein,
+ohne dass sich der Ordnername ändert.
 
 ## Wenn etwas schiefgeht
 
