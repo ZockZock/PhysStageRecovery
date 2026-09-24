@@ -13,9 +13,9 @@ namespace BoosterWatch
         public readonly Color Text = new Color(0.91f, 0.94f, 0.97f);
         public readonly Color Secondary = new Color(0.58f, 0.65f, 0.73f);
         public GUIStyle Window, Panel, Inset, Title, Heading, Body, Muted, Small, Value, CompactValue, Button, ActiveButton, Field, Tab, ActiveTab, Badge;
-        public GUIStyle FuelTrack, FuelFill, FuelLow, FuelMark;
-        // The reserved part of a fuel bar is drawn as diagonal stripes, tiled from this small texture
-        // (GUI.DrawTextureWithTexCoords), with the bar's own height as the tile height.
+        public GUIStyle FuelTrack, FuelFill, FuelLow;
+        // The reserved part of the stock fuel gauge is drawn as diagonal stripes, tiled from this small
+        // texture (a RawImage with a uvRect), so the stripes stay the same width on any bar.
         public Texture2D ReserveStripe;
         public WindowTheme()
         {
@@ -26,7 +26,6 @@ namespace BoosterWatch
             FuelTrack = Surface(new Color(0.035f, 0.051f, 0.078f), 3);
             FuelFill = Surface(Accent, 3);
             FuelLow = Surface(new Color(0.96f, 0.68f, 0.31f), 3);
-            FuelMark = Surface(new Color(1f, 1f, 1f, 0.75f), 0);
             ReserveStripe = Striped(new Color(0.40f, 0.89f, 0.76f, 0.85f), new Color(0.05f, 0.12f, 0.13f, 0.85f));
             Title = Label(20, Text, FontStyle.Bold);
             Heading = Label(16, Text, FontStyle.Bold);

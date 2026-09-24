@@ -42,9 +42,6 @@ namespace BoosterWatch
         // ground, and how much of it the canopy needs to inflate.
         public double ChuteHeight = 1000;
         public float WindowWidth = 720, WindowHeight = 720, WindowX = 35, WindowY = 60;
-        // The small always-on reserve display. Negative means "not placed yet": it then appears at the
-        // left edge, level with the stock staging list and the fuel readouts.
-        public float ReserveHudX = -1, ReserveHudY = -1;
         private string filePath;
         public static string Path { get { return System.IO.Path.Combine(KSPUtil.ApplicationRootPath, "GameData/PhysStageRecovery/PluginData/settings.cfg"); } }
 
@@ -65,8 +62,6 @@ namespace BoosterWatch
                 s.WindowHeight = (float)Read(n, "windowHeight", 720, 540, 4320);
                 s.WindowX = (float)Read(n, "windowX", 35, 0, 7680);
                 s.WindowY = (float)Read(n, "windowY", 60, 0, 4320);
-                s.ReserveHudX = (float)Read(n, "reserveHudX", -1, -1, 7680);
-                s.ReserveHudY = (float)Read(n, "reserveHudY", -1, -1, 4320);
                 s.Limits.SinkSpeed = Read(n, "maxSinkSpeed", 8, 0.5, 20);
                 s.Limits.HorizontalSpeed = Read(n, "maxHorizontalSpeed", 3, 0.1, 10);
                 s.Limits.TotalSpeed = Read(n, "maxTotalSpeed", 9, 0.5, 25);
@@ -165,7 +160,6 @@ namespace BoosterWatch
                 Set(n, "maxAngularSpeed", Limits.AngularSpeed);
                 Set(n, "windowWidth", WindowWidth); Set(n, "windowHeight", WindowHeight);
                 Set(n, "windowX", WindowX); Set(n, "windowY", WindowY);
-                Set(n, "reserveHudX", ReserveHudX); Set(n, "reserveHudY", ReserveHudY);
                 root.Save(temporary);
                 // Keep one backup of the previous file, then swap the new one in. File.Replace
                 // is not available under every file policy, so back up and move explicitly.

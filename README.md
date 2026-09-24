@@ -1,4 +1,4 @@
-# PhysStageRecovery 0.9.25 — KSP 1.12.5
+# PhysStageRecovery 0.9.26 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
@@ -36,6 +36,18 @@ Steht dort weniger, fehlt an einem Teil der Regler — das Log meldet es dann al
 gesetzter Vorhalt überlebt Werkstatt und Rampe nicht. Triebwerke ohne Abschaltung (Feststoffbooster)
 bekommen den Regler weiterhin nicht zu sehen.
 
+## 0.9.26: Das eigene Feld ist wieder weg
+
+Mit der Schraffur auf der Stock-Tankanzeige war der frei verschiebbare Balken aus 0.9.23 nur noch eine
+zweite Anzeige derselben Zahl — er ist entfernt: das Feld selbst, sein Ziehbereich, die Einstellungen
+`reserveHudX`/`reserveHudY` und die eigene Markierungsfarbe im Theme. Der Vorhalt steht jetzt an genau
+**einer** Stelle: auf der Stock-Tankanzeige.
+
+Wird die Stock-Anzeige wider Erwarten nicht gefunden, sagt das Log es, und der Vorhalt bleibt im
+Triebwerksmenü ablesbar (Regler `Lande-Vorhalt (%)`, Statuszeile, Werkzeugtip). Gehalten, gemeldet und
+freigegeben wird die Reserve in beiden Fällen identisch — es fehlt dann nur die Schraffur im
+Stufenfeld, nicht die Funktion.
+
 ## 0.9.25: Die Schraffur sitzt auf der Balkenfläche
 
 Der erste Wurf lag auf der **Box** statt auf dem Balken: `StageGroup.DeltaVHeadingImage` ist der Rahmen,
@@ -56,8 +68,7 @@ danebengehendes Overlay ist damit in einem Start erklärt statt geraten.
 
 Der Vorhalt ist jetzt **direkt auf der Tankanzeige des Spiels** zu sehen — dort, wo im Stufenfeld der
 Balken mit `FT` steht. Der reservierte Anteil bekommt dort die Schraffur, der Rest bleibt der
-Stock-Balken; das eigene Feld aus 0.9.23 erscheint nur noch, wenn die Stock-Anzeige nicht nutzbar ist
-oder ein verfolgter Booster den Vorhalt hält.
+Stock-Balken; das eigene Feld aus 0.9.23 entfiel in 0.9.26 wieder.
 
 **Position und Größe sind abfragbar — ohne Ratespiel.** Die Stock-Anzeige ist öffentliche API:
 
@@ -94,7 +105,7 @@ Beim ersten Einblenden steht im Log, was gefunden wurde — oder warum nicht:
 [PhysStageRecovery] Lande-Vorhalt: Stock-Tankanzeige nicht nutzbar - kein Stufenfeld fuer Stufe 2 (Felder: 5,4,3,2,1)
 ```
 
-## 0.9.23: Der Vorhalt als eigenes Feld im Flug
+## 0.9.23: Der Vorhalt als eigenes Feld im Flug — in 0.9.26 wieder entfernt
 
 Der Vorhalt war in 0.9.22 nur im Mod-Fenster zu sehen — und das Fenster öffnet sich erst, wenn sich
 eine Stufe trennt. Während des Aufstiegs war die Anzeige damit unsichtbar. **Das Mod-Fenster bleibt

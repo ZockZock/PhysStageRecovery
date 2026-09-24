@@ -181,7 +181,9 @@ namespace BoosterWatch
                 gaugeBar = bar;
                 overlayHost = area;
                 Debug.Log("[PhysStageRecovery] Lande-Vorhalt: Schraffur an '" + area.name + "' eingehaengt ("
-                    + FuelReserve.PercentText(100 * reserve.Reserve) + " von " + Size(area) + ").");
+                    + FuelReserve.PercentText(100 * reserve.Reserve) + " von " + Size(area)
+                    + ", Rest " + FuelReserve.ShareText(reserve.Remaining)
+                    + (reserve.Engine.Length > 0 ? ", " + reserve.Engine : "") + ").");
             }
             catch (Exception e)
             {
@@ -198,9 +200,5 @@ namespace BoosterWatch
             if (reserveOverlay.gameObject != null) Destroy(reserveOverlay.gameObject);
             reserveOverlay = null;
         }
-
-        // The overlay replaces the own field while it is on screen; the field stays for the booster
-        // being followed and as the fallback when the stock bar cannot be used.
-        private bool ReserveOverlayActive { get { return reserveOverlay != null && reserveOverlay.enabled; } }
     }
 }

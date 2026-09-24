@@ -80,10 +80,9 @@ namespace BoosterWatch
         private bool setup, shuttable, locked, started, flew, faulted, textDirty = true, padWarned;
         private float nextRefresh = float.NegativeInfinity;
 
-        // Read by the flight window: what this engine's reserve is and where it stands.
+        // Read by the reserve display: what this engine's reserve is and whether it still holds.
         public string EngineTitle { get { return engineName; } }
         public double OwnTankShare { get { return FuelReserve.RemainingShare(stocks); } }
-        public bool IsHolding { get { return locked; } }
 
         // A module put on a part at runtime gets no OnStart, so everything that has to happen once is
         // done from the update hooks instead - and from OnAwake, which KSP calls while the module is

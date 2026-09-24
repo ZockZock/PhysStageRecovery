@@ -75,7 +75,7 @@ namespace BoosterWatch
             GameEvents.onCrash.Add(OnCrash);
             GameEvents.onCrashSplashdown.Add(OnCrash);
             AddToolbar();
-            Debug.Log("[PhysStageRecovery] 0.9.25 started; physics range " + settings.PhysicsRange + " m.");
+            Debug.Log("[PhysStageRecovery] 0.9.26 started; physics range " + settings.PhysicsRange + " m.");
         }
 
         private void AddToolbar()
@@ -169,7 +169,6 @@ namespace BoosterWatch
             if ((!geometryDirty && !cameraDirty) || settings == null) return;
             settings.WindowWidth = window.width; settings.WindowHeight = window.height;
             settings.WindowX = window.x; settings.WindowY = window.y;
-            if (reserveHudReady) { settings.ReserveHudX = reserveHud.x; settings.ReserveHudY = reserveHud.y; }
             settings.CameraDistance = cameraFeed.Distance; settings.CameraHeading = cameraFeed.Heading; settings.CameraPitch = cameraFeed.Pitch;
             if (settings.Save()) { geometryDirty = false; cameraDirty = false; }
         }
@@ -613,30 +612,22 @@ namespace BoosterWatch
 
         public void OnGUI()
         {
-            if (!uiVisible || settings == null || FlightDriver.Pause) return;
+            if (!visible || !uiVisible || settings == null || FlightDriver.Pause) return;
             GUISkin previous = GUI.skin;
             try
             {
                 GUI.skin = HighLogic.Skin;
                 EnsureWindowTheme();
-                // The reserve field stands on its own: it is what tells the reserve apart during the
-                // ascent, when the big window is still closed.
-                bool overReserve = DrawReserveHud();
-                bool overWindow = false, editing = false;
-                if (visible)
-                {
-                    ResizeWindow();
-                    Rect before = window;
-                    window.width = Mathf.Clamp(window.width, Mathf.Min(480, Screen.width), Screen.width);
-                    window.height = Mathf.Clamp(window.height, Mathf.Min(540, Screen.height), Screen.height);
-                    window.x = Mathf.Clamp(window.x, 0, Mathf.Max(0, Screen.width - window.width));
-                    window.y = Mathf.Clamp(window.y, 0, Mathf.Max(0, Screen.height - window.height));
-                    window = GUI.Window(GetInstanceID(), window, DrawWindow, "", windowTheme.Window);
-                    if (window != before) geometryDirty = true;
-                    editing = settingsOpen && GUI.GetNameOfFocusedControl().StartsWith("BW", StringComparison.Ordinal);
-                    overWindow = window.Contains(new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y));
-                }
-                if (resizing || editing || overWindow || overReserve)
+                ResizeWindow();
+                Rect before = window;
+                window.width = Mathf.Clamp(window.width, Mathf.Min(480, Screen.width), Screen.width);
+                window.height = Mathf.Clamp(window.height, Mathf.Min(540, Screen.height), Screen.height);
+                window.x = Mathf.Clamp(window.x, 0, Mathf.Max(0, Screen.width - window.width));
+                window.y = Mathf.Clamp(window.y, 0, Mathf.Max(0, Screen.height - window.height));
+                window = GUI.Window(GetInstanceID(), window, DrawWindow, "", windowTheme.Window);
+                if (window != before) geometryDirty = true;
+                bool editing = settingsOpen && GUI.GetNameOfFocusedControl().StartsWith("BW", StringComparison.Ordinal);
+                if (resizing || editing || window.Contains(new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y)))
                     InputLockManager.SetControlLock(ControlTypes.CAMERACONTROLS | ControlTypes.STAGING | ControlTypes.TWEAKABLES
                         | (editing ? ControlTypes.ALL_SHIP_CONTROLS : ControlTypes.None), HoverLock);
                 else InputLockManager.RemoveControlLock(HoverLock);
