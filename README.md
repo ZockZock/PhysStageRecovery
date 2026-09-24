@@ -1,4 +1,4 @@
-# PhysStageRecovery 0.9.24 — KSP 1.12.5
+# PhysStageRecovery 0.9.25 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
@@ -35,6 +35,22 @@ Beim Start steht die Kontrolle in `KSP.log`:
 Steht dort weniger, fehlt an einem Teil der Regler — das Log meldet es dann als Fehler, und ein dort
 gesetzter Vorhalt überlebt Werkstatt und Rampe nicht. Triebwerke ohne Abschaltung (Feststoffbooster)
 bekommen den Regler weiterhin nicht zu sehen.
+
+## 0.9.25: Die Schraffur sitzt auf der Balkenfläche
+
+Der erste Wurf lag auf der **Box** statt auf dem Balken: `StageGroup.DeltaVHeadingImage` ist der Rahmen,
+der das Kürzel (`FT`) und den Balken trägt — die Schraffur lag damit über dem Kürzel und war so hoch
+wie die Box. Der Balken ist die **breiteste Grafik innerhalb dieser Box** (ein Kürzel ist ein
+Textobjekt ohne Grafik und kann nicht gewinnen); an ihr hängt das Overlay jetzt, mit ihrer Breite als
+Bezug für den Anteil und ihrer Höhe:
+
+```
+[PhysStageRecovery] Lande-Vorhalt auf der Stock-Tankanzeige: Stufe 2 Box=92x14 Flaeche='Image' 74x10 Typ=Filled fill=0.75
+[PhysStageRecovery] Lande-Vorhalt: Schraffur an 'Image' eingehaengt (25 % von 74x10).
+```
+
+Die Logzeile nennt Box, Balkenfläche, Grafiktyp, Füllstand und die eingehängte Fläche — ein
+danebengehendes Overlay ist damit in einem Start erklärt statt geraten.
 
 ## 0.9.24: Der Vorhalt liegt auf der Stock-Tankanzeige
 

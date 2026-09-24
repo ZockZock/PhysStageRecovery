@@ -1,0 +1,8 @@
+# Der Quelltext liegt im Repository mit LF-Zeilenenden (siehe docs/ENTWICKLUNG.md).
+# Diese Datei haelt das fest, damit ein Werkzeug, das CRLF schreibt, beim Commit auf LF
+# normalisiert wird statt die halbe Datei als Aenderung zu zeigen.
+* text=auto eol=lf
+*.png binary
+*.webp binary
+*.zip binary
+*.dll binary
