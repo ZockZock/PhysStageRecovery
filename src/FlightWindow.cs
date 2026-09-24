@@ -13,7 +13,7 @@ namespace BoosterWatch
         {
             float w = window.width - 36;
             GUI.Label(new Rect(18, 12, w - 120, 30), "PhysStageRecovery", windowTheme.Title);
-            GUI.Label(new Rect(window.width - 125, 17, 60, 22), "0.9.22", windowTheme.Small);
+            GUI.Label(new Rect(window.width - 125, 17, 60, 22), "0.9.23", windowTheme.Small);
             if (GUI.Button(new Rect(window.width - 48, 14, 30, 28), new GUIContent("×", "Fenster schließen"), windowTheme.Button)) SetVisible(false);
             GUI.Label(new Rect(19, 44, w, 20), "STUFEN LANDEN. MISSION FORTSETZEN.", windowTheme.Small);
 
@@ -58,10 +58,6 @@ namespace BoosterWatch
                 GUI.Label(new Rect(38, emptyY + 44, w - 40, 62), faulted ? notice :
                     "Sobald sich ein Booster mit Fallschirmen oder nutzbarem Landetriebwerk trennt, öffnet sich dieses Fenster automatisch.", windowTheme.Body);
                 GUI.Label(new Rect(38, emptyY + 117, w - 40, 50), initialized ? notice : "Du steuerst deine Rakete. Wir verfolgen die abgetrennten Stufen.", windowTheme.Muted);
-                // The reserve belongs to the rocket as long as it is one piece; this is where it is
-                // watched while the ascent is still running.
-                if (activeReserve.Configured)
-                    ReserveCard(new Rect(38, window.height - 210, w - 40, 78), activeReserve);
                 return;
             }
             TrackedBooster b = boosters[Mathf.Clamp(selection, 0, boosters.Count - 1)];
@@ -100,8 +96,7 @@ namespace BoosterWatch
                 "ENTFERNUNG", Number(b.Distance / 1000, " km"));
             FuelMetric(new Rect(narrow ? 28 + card : 48 + 3 * card, narrow ? y + 73 : y, card, 63),
                 validReadout ? b.Readout.FuelFraction : double.NaN,
-                validReadout ? b.Readout.RemainingDeltaV : double.NaN,
-                validReadout ? b.Readout.Reserve : null);
+                validReadout ? b.Readout.RemainingDeltaV : double.NaN);
             y += metricsHeight + 10;
             string state = PrimaryStatus(b);
             if (!faulted && enabledMod && !b.Finished && b.Sample.PhysicsActive
@@ -120,7 +115,7 @@ namespace BoosterWatch
             GUIStyle style = windowTheme.Value.CalcSize(new GUIContent(value)).x > rect.width - 24 ? windowTheme.CompactValue : windowTheme.Value;
             GUI.Label(new Rect(rect.x + 12, rect.y + 25, rect.width - 24, 32), new GUIContent(value, value), style);
         }
-        private void FuelMetric(Rect rect, double fraction, double deltaV, ReserveStatus reserve)
+        private void FuelMetric(Rect rect, double fraction, double deltaV)
         {
             GUI.Box(rect, "", windowTheme.Panel);
             GUI.Label(new Rect(rect.x + 12, rect.y + 5, rect.width - 24, 18), "REST-Δv", windowTheme.Small);
@@ -130,53 +125,13 @@ namespace BoosterWatch
             GUI.Label(new Rect(rect.x + 12, rect.y + 22, rect.width - 24, 27),
                 new GUIContent(value, "Verbleibendes Δv im Vakuum für die Landetriebwerke"), style);
             Rect bar = new Rect(rect.x + 12, rect.y + 53, rect.width - 24, 6);
-            FuelBar(bar, fraction, reserve);
-        }
-
-        // The fuel bar. With a landing reserve configured it is read against the engine's OWN tanks
-        // (the same denominator the reserve is a share of) and drawn in two parts: the reserved share
-        // on the left, hatched, and above it what may still be burned. Once the fuel drops into the
-        // hatched part, the landing is living off its reserve.
-        private void FuelBar(Rect bar, double fraction, ReserveStatus reserve)
-        {
             GUI.Box(bar, "", windowTheme.FuelTrack);
-            bool marked = reserve != null && reserve.Configured && RecoveryPolicy.Finite(reserve.Reserve)
-                && reserve.Reserve > 0;
-            double level = marked && RecoveryPolicy.Finite(reserve.Remaining) ? reserve.Remaining : fraction;
-            string tip = RecoveryPolicy.Finite(fraction)
+            if (RecoveryPolicy.Finite(fraction) && fraction > 0)
+                GUI.Box(new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01((float)fraction), bar.height), "",
+                    fraction < 0.15 ? windowTheme.FuelLow : windowTheme.FuelFill);
+            GUI.Label(bar, new GUIContent("", RecoveryPolicy.Finite(fraction)
                 ? "Landetreibstoff: " + (100 * fraction).ToString("0") + " % der Tankkapazität"
-                : "Kein Tankfüllstand verfügbar";
-            if (!marked)
-            {
-                if (RecoveryPolicy.Finite(level) && level > 0)
-                    GUI.Box(new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01((float)level), bar.height), "",
-                        level < 0.15 ? windowTheme.FuelLow : windowTheme.FuelFill);
-                GUI.Label(bar, new GUIContent("", tip), windowTheme.Small);
-                return;
-            }
-            float width = Mathf.Clamp01((float)level) * bar.width;
-            float limit = Mathf.Clamp01((float)reserve.Reserve) * bar.width;
-            float hatched = Mathf.Min(width, limit);
-            if (hatched > 0.5f)
-                GUI.DrawTextureWithTexCoords(new Rect(bar.x, bar.y, hatched, bar.height), windowTheme.ReserveStripe,
-                    new Rect(0, 0, Mathf.Max(1, hatched) / 8f, Mathf.Max(1, bar.height) / 8f));
-            if (width > limit)
-                GUI.Box(new Rect(bar.x + limit, bar.y, width - limit, bar.height), "", windowTheme.FuelFill);
-            GUI.Box(new Rect(bar.x + limit - 1, bar.y - 1, 2, bar.height + 2), "", windowTheme.FuelMark);
-            GUI.Label(bar, new GUIContent("", tip + "\nVorhalt: " + reserve.Worth), windowTheme.Small);
-        }
-
-        // While the rocket is still being flown there is no tracked booster yet, and this is where the
-        // reserve of its landing engine is worth watching.
-        private void ReserveCard(Rect rect, ReserveStatus reserve)
-        {
-            GUI.Box(rect, "", windowTheme.Panel);
-            GUI.Label(new Rect(rect.x + 12, rect.y + 4, rect.width - 24, 18), "LANDE-VORHALT", windowTheme.Small);
-            GUI.Label(new Rect(rect.x + 12, rect.y + 21, rect.width - 24, 22),
-                new GUIContent(reserve.Worth, reserve.Engine.Length > 0 ? reserve.Engine : reserve.Worth), windowTheme.Body);
-            Rect bar = new Rect(rect.x + 12, rect.y + 45, rect.width - 24, 8);
-            FuelBar(bar, reserve.Remaining, reserve);
-            GUI.Label(new Rect(rect.x + 12, rect.y + 55, rect.width - 24, 20), reserve.StateText, windowTheme.Small);
+                : "Kein Tankfüllstand verfügbar"), windowTheme.Small);
         }
 
         private string PrimaryStatus(TrackedBooster b)        {

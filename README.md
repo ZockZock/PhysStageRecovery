@@ -1,4 +1,4 @@
-# PhysStageRecovery 0.9.22 — KSP 1.12.5
+# PhysStageRecovery 0.9.23 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
@@ -36,17 +36,32 @@ Steht dort weniger, fehlt an einem Teil der Regler — das Log meldet es dann al
 gesetzter Vorhalt überlebt Werkstatt und Rampe nicht. Triebwerke ohne Abschaltung (Feststoffbooster)
 bekommen den Regler weiterhin nicht zu sehen.
 
-**Der Vorhalt ist jetzt sichtbar.** In der **Flugübersicht** zeigt die Treibstoffanzeige den Vorhalt
-wie in Kerbal Engineer: Der reservierte Anteil steht **schraffiert** am linken Ende des Balkens, eine
-weiße Markierung trennt ihn vom nutzbaren Treibstoff. Wandert der Füllstand in die Schraffur, lebt die
-Landung von ihrem Vorhalt.
+## 0.9.23: Der Vorhalt als eigenes Feld im Flug
 
-* Am **verfolgten Booster** wird der Balken dann gegen die **eigenen Tanks** des Landetriebwerks
-  gelesen, nicht gegen das ganze Schiff — nur so passen Füllstand und Vorhaltmarke auf dieselbe Skala.
-  Der Hinweistext am Balken nennt den Vorhalt im Klartext (`25 % = 4.89 t aus 2 Tanks, ca. 780 m/s`).
-* Solange die Rakete **noch ein Stück** ist, also kein Booster verfolgt wird, steht im Panel die Karte
-  `LANDE-VORHALT` der fliegenden Rakete: Wert, Balken mit Schraffur und der Zustand, etwa
-  `Vorhalt aktiv: Rest 41.2 % (Grenze 25 %)`.
+Der Vorhalt war in 0.9.22 nur im Mod-Fenster zu sehen — und das Fenster öffnet sich erst, wenn sich
+eine Stufe trennt. Während des Aufstiegs war die Anzeige damit unsichtbar. **Das Mod-Fenster bleibt
+unverändert**; der Vorhalt bekommt stattdessen ein **eigenes kleines Feld**, das sofort erscheint,
+sobald an der fliegenden Rakete oder an einem verfolgten Booster ein Vorhalt eingestellt ist, und das
+sonst vollständig verschwindet:
+
+```
+LANDE-VORHALT                                        25 %
+▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+aktiv: Rest 41.2 % (Grenze 25 %)
+```
+
+* Der reservierte Anteil steht **schraffiert** am linken Ende des Balkens, eine weiße Markierung trennt
+  ihn vom nutzbaren Treibstoff. Wandert der Füllstand in die Schraffur, lebt die Landung von ihrem
+  Vorhalt. Genau die Darstellung der Stock-Treibstoffanzeige, nur eben für den Vorhalt.
+* Der Balken wird gegen die **eigenen Tanks** des Landetriebwerks gelesen — die Skala, von der der
+  Vorhalt ein Anteil ist —, nicht gegen das ganze Schiff. Am Booster (nach der Trennung) zeigt das Feld
+  dessen Vorhalt, davor den der fliegenden Rakete.
+* Das Feld ist **frei verschiebbar** (linke Maustaste ziehen) und merkt sich seinen Platz in
+  `settings.cfg`. Es lässt sich damit genau neben die Stock-Treibstoffanzeige oder die
+  Stufen-Delta-v-Anzeige legen. Voreinstellung: linker Rand auf Höhe der Stufenliste.
+* Beim Ziehen bleibt die Stock-Kamera stehen (derselbe Mausschutz wie beim Mod-Fenster), und der
+  Werkzeugtip am Balken nennt den Vorhalt im Klartext (`Vorhalt 25 % der eigenen Tanks, Rest 41.2 %`,
+  dazu `25 % = 4.89 t aus 2 Tanks, ca. 780 m/s`).
 
 ## 0.9.21: Lande-Vorhalt am Triebwerk
 
