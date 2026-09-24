@@ -69,6 +69,7 @@ git worktree add ..\BoosterWatch-v0.9.20 v0.9.20   # zweiter Ordner mit diesem S
 .\build.ps1
 .\install.ps1     # KSP muss geschlossen sein
 .\tools\install-when-closed.ps1   # Alternative: wartet, bis KSP beendet ist, und installiert dann
+.\tools\release.ps1               # baut und packt das Release-Archiv samt .sha256
 
 git status        # was ist geändert?
 git diff          # was genau?
