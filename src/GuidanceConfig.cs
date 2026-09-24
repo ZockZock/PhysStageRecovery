@@ -10,9 +10,11 @@ namespace BoosterWatch.Guidance
         public sealed class TerminalSettings
         {
             internal TerminalSettings Copy() { return (TerminalSettings)MemberwiseClone(); }
-            // Target sink rate for the last metres and the vertical speed the vehicle aims to
-            // touch down with. The user's number: 5 m/s.
-            public double TouchdownSpeed = 5;
+            // Target sink rate for the last metres and the vertical speed the vehicle aims to touch
+            // down with. The profile the whole descent is built on: full-thrust braking arrives at the
+            // capture altitude with `CaptureSpeed` on the clock, and from there this is the number the
+            // descent is tapered to by the time the engines are cut.
+            public double TouchdownSpeed = 2;
             // Height of the hull bottom above the ground at which the vertical final phase begins.
             public double Altitude = 50;
             // Below this height the sink target is blended down to SoftTouchdownSpeed so the
@@ -45,26 +47,35 @@ namespace BoosterWatch.Guidance
         {
             internal PredictorSettings Copy() { return (PredictorSettings)MemberwiseClone(); }
             public double CaptureAltitude = 100;
-            public double CaptureSpeed = 10;
-            public double CaptureLateralSpeed = 2;
+            // The vertical speed the braking burn has to have reached by the capture altitude. From
+            // there the terminal phase takes the descent over and tapers it to the touchdown speed, so
+            // this is the number the whole burn is aimed at: the ignition point is the latest one from
+            // which a full-thrust burn arrives here at exactly this speed, upright and without drift.
+            public double CaptureSpeed = 5;
+            // Sideways speed still allowed at the capture altitude. The burn aims at none of it; this
+            // is the width of the gate the plan and the flight are measured against.
+            public double CaptureLateralSpeed = 0.5;
             // How much sideways speed above `CaptureLateralSpeed` may still be on the vehicle when it
-            // reaches the capture altitude. The gate is narrow on purpose: it is what keeps the
-            // ignition early for an entry that arrives with its speed mostly sideways, and early is
-            // what makes those entries work at all.
+            // reaches the capture altitude. This is a gate on the *plan*, not on the landing: the burn
+            // itself always aims at none of it, and a trial is only ever accepted when the same law
+            // then flies it to a soft touchdown.
             //
-            // Widening it to 4 m/s was tried on 24.09.2026 (0.9.16) and reverted the same day. With
-            // the room, the planner takes the latest burn its trial accepts: 2683 m and 23 s instead
-            // of 16793 m and 152 s, with the same soft touchdown predicted both times. But the trial
-            // applies the commanded thrust along the commanded axis, and this vehicle cannot hold that
-            // axis above about a kilometre - the airstream pins it retrograde and the flight log shows
-            // 50 to 70 degrees of attitude error against a near-vertical command. The authority the
-            // trial assumes is not there, so the vehicle reaches the flare far too fast. The flight of
-            // 09:07 was decided by that defect either way (its plan was a best-effort burn at 4121 m
-            // and it hit the ground at 111 m/s), but the wide gate moved the two entries that do land
-            // onto exactly that unproven late burn, for a propellant saving that is not worth a
-            // landing. What the gate really needs is a trial that models the axis the vehicle can
-            // hold; until there is one, this is the safer number.
-            public double CaptureLateralTolerance = 0.5;
+            // It is what sets the ignition point for an entry that arrives with its speed mostly
+            // sideways, and that is where its value is felt. Too tight and the plan is pushed
+            // kilometres up: with 1 m/s, the flight of 24.09.2026 at 09:51 had every candidate below
+            // 4.4 km rejected for the drift alone - the touchdown was predicted at 5.8 m/s for all of
+            // them - so it lit up at 4.4 km and then modulated 48 s at 30 % thrust on the way down,
+            // 7.9 t of propellant for a landing the same law flies on 4.0 t from 3.2 km.
+            //
+            // Widening the gate was tried once before (0.9.16) and reverted, because the trial of
+            // that day applied the commanded thrust along the commanded axis and this vehicle cannot
+            // hold that axis while it is fast: it planned a burn the vehicle could not fly. The trial
+            // knows the axis now (AeroPinningPressure) and the command does too, which is what makes
+            // the room usable. Measured against the recorded flights, with the gate at 4.5 m/s every
+            // one of them still lands at 5.6 m/s with 0.2 to 0.5 m/s of drift left, including the
+            // state that crashed on 09:07. Beyond 4 m/s nothing changes: the touchdown speed and the
+            // flare, not the drift, decide the ignition from there on.
+            public double CaptureLateralTolerance = 4;
             public double UpdateInterval = 0.5;
             // Integration step of the remaining-descent forecast [s].
             public double TimeStep = 0.05;
@@ -87,6 +98,21 @@ namespace BoosterWatch.Guidance
             // velocity, so it always helps - but a burning booster leans to steer, and not all of
             // its cross-section stays presented to the airstream.
             public double DragEffectiveness = 0.8;
+            // Dynamic pressure above which the airstream decides where the hull points, not the
+            // controller. A booster crossing the sky at entry speed cannot swing its engines to the
+            // commanded axis: the air holds it in the relative wind, so the engine brakes along the
+            // flight path instead of holding the descent up. A forecast that ignores this promises a
+            // soft arrival the vehicle cannot fly, and the flight of 24.09.2026, 09:07 is what that
+            // costs - a plan that read "touchdown 6 m/s" ended at 111 m/s.
+            //
+            // Measured on the flights of the same day: the 26.4 t booster held the commanded axis
+            // again below about 21 kPa (0.3 deg of error at 738 m) and the 27.6 t one below about
+            // 46 kPa (1.5 deg at 648 m), while above that their error equalled the angle between the
+            // command and the flight path. 40 kPa sits between the two measurements, on the side
+            // that keeps the forecast pessimistic - a forecast that is too gloomy only lights the
+            // engines earlier, which is what lands these entries; one that is too optimistic flies
+            // them into the ground.
+            public double AeroPinningPressure = 40000;
             // The whole law keeps this much of the engines' acceleration in reserve for attitude
             // control, spool-up error and a forecast that is one second off.
             public double ThrustReserve = 0.2;
@@ -99,6 +125,12 @@ namespace BoosterWatch.Guidance
         {
             internal ControlSettings Copy() { return (ControlSettings)MemberwiseClone(); }
             public double LateralTimeConstant = 1.2;
+            // How hard the terminal phase pulls the sink rate back onto the profile below the capture
+            // altitude, in seconds: the commanded deceleration is the error over this number. A short
+            // value tracks the taper from the capture speed to the touchdown speed closely and asks
+            // for more thrust while doing it; a long one lets the booster ride its capture speed down.
+            // Half a second holds the taper with a metre per second of error at most.
+            public double FlareResponse = 0.5;
             // Bell under the braking command: the descent profile is a ladder whose coefficient is
             // this fraction of the ballistic fall (capped at 1, see DescentGuidance.TargetSink).
             // Higher means a steeper profile, a faster fall and a later, harder brake.

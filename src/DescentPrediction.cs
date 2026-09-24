@@ -262,7 +262,34 @@ namespace BoosterWatch.Guidance
                 if (flow > 0 && flow * dt > mass - c.DryMass)
                     throttle *= Math.Max(0, mass - c.DryMass) / (flow * dt);
                 double acceleration = available * throttle * config.Predictor.BurnSteeringLoss;
-                Point next = Integrate(c, p, drag, acceleration * command.Up, acceleration * command.East, dt);
+                // Where the hull points is where the thrust goes, and above the pinning pressure the
+                // airstream decides that, not the controller: the booster flies the relative wind, so
+                // the engine brakes along the flight path instead of holding the descent up. The
+                // flight logs of 24.09.2026 are unambiguous about it - the logged attitude error
+                // equalled the angle between the command and the flight path (74 deg at 15 km,
+                // 63 deg at 3.8 km) and fell to nothing only once the air had lost its momentum
+                // (0.3 deg at 738 m, 21 kPa). Blending back to the commanded axis as the pressure
+                // falls is what keeps the low, slow part of a trial - the part that lands -
+                // unchanged, and it is why this forecast no longer promises a soft arrival to a
+                // booster that is still being flown by the air.
+                double up = command.Up, east = command.East;
+                double speed = Math.Sqrt(p.Sink * p.Sink + p.Lateral * p.Lateral);
+                double pinning = config.Predictor.AeroPinningPressure;
+                if (pinning > 1 && speed > 1e-6)
+                {
+                    double pressure = 0.5 * Sample(c.Density, p.Height) * speed * speed;
+                    double control = Clamp(1 - pressure / pinning, 0, 1);
+                    if (control < 1)
+                    {
+                        double windUp = p.Sink / speed, windEast = -p.Lateral / speed;
+                        up = (1 - control) * windUp + control * command.Up;
+                        east = (1 - control) * windEast + control * command.East;
+                        double norm = Math.Sqrt(up * up + east * east);
+                        if (norm > 1e-9) { up /= norm; east /= norm; }
+                        else { up = command.Up; east = command.East; }
+                    }
+                }
+                Point next = Integrate(c, p, drag, acceleration * up, acceleration * east, dt);
                 if (!Finite(next.Height) || !Finite(next.Sink) || !Finite(next.Lateral)) return result;
                 if (!captured && next.Height <= capture)
                 {
@@ -357,6 +384,7 @@ namespace BoosterWatch.Guidance
                     + 2 * Math.Max(0, trial.CaptureLateral - config.Predictor.CaptureLateralSpeed - config.Predictor.CaptureLateralTolerance)
                     + (trial.Dry ? 100 : 0) : double.PositiveInfinity;
                 // Sub-tolerance differences at touchdown do not justify a much longer burn.
+
                 if (Finite(score) && (score < bestScore - 0.25
                     || (Math.Abs(score - bestScore) <= 0.25 && trial.DeltaV < effort.DeltaV)))
                 { bestScore = score; bestEffort = index; effort = trial; }

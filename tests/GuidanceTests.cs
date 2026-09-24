@@ -675,7 +675,9 @@ internal static class GuidanceTests
         rising.Time = 60;
         GuidanceStep up = guidance.Step(rising, 37500, 0.02, true);
         Console.WriteLine("     DIAG steigend: cmd=" + (100 * up.Throttle).ToString("0") + " %, Up-Achse="
-            + up.Up.ToString("0.00"));
+            + up.Up.ToString("0.00") + ", up=" + up.AccelerationUp.ToString("0.0000")
+            + ", ost=" + up.AccelerationEast.ToString("0.0000") + ", phase=" + DescentPhases.Name(up.Phase)
+            + ", ziel=" + up.TargetSink.ToString("0.0") + ", coast=" + up.Coasting);
         Near(up.Throttle, 0, 1e-9, "steigender Booster bekommt keinen Schub");
         // Upright, not retrograde: a booster on its way back up has no thrust to steer with, and the
         // attitude it should fall back onto is its engines. The coast aims retrograde while there is
@@ -929,19 +931,18 @@ internal static class GuidanceTests
     // 16786 m with 338 m/s of sink, 1779 m/s of it sideways, and 4.7 m^2 of drag area because the
     // hull was flying engines-first and not broadside.
     //
-    // This is the entry class that punishes a clever planner. Every candidate later than "now" costs
-    // less propellant and the trial predicts a soft touchdown for each of them, because the trial
-    // applies the commanded thrust along the commanded axis - and this vehicle cannot hold that axis
-    // while it is fast. The airstream pins it retrograde: the crashed flight of 09:07 shows 50 to 70
-    // degrees of attitude error against a near-vertical command, so the engine pushed against the
-    // flight path instead of holding the descent up. The long, weak burn at the top is what keeps the
-    // vehicle in the air long enough for the drag to take the sideways speed out, and 0.9.16 was
-    // reverted for moving it.
+    // This is the entry class that decides what the law is worth. Its speed is mostly sideways, and
+    // while it is fast the airstream owns the hull: the crashed flight of 09:07 shows 50 to 70 degrees
+    // of attitude error against a near-vertical command, so a burn there pushes along the flight path
+    // whether or not that is what was asked for. A law that ignores that mis-plans itself - it asks
+    // for a vertical deceleration it will not get and has to light the engines kilometres early - and
+    // that early, weak burn is what the flights of 0.9.14 to 0.9.18 were doing.
     //
-    // So what is checked here is the opposite of what looks efficient: the burn stays high, and the
-    // landing stays soft. The measured ignition is 10403 m, the touchdown 5.64 m/s with 0.62 m/s
-    // sideways, and the propellant cost 5.7 t of the 13 t it carries.
-    private static void TestHeavySidewaysEntryKeepsItsEarlyBurn()
+    // With the command aimed in the blend of what is wanted and what the air allows, and the engine
+    // run at what it has while the air is in charge, the same entry lights up at 3755 m instead of
+    // 15716 m: a 38 s burn that reaches 97 % throttle, arrives at the capture altitude at 5.2 m/s with
+    // 0.2 m/s of drift, and lands at 5.56 m/s on 8.6 t of the 12 t it carries.
+    private static void TestHeavySidewaysEntryBrakesLateAndHard()
     {
         Console.WriteLine("-- 26 t mit 1779 m/s Seitwaertsfahrt aus 16.8 km");
         GuidanceRunner runner = MakeRunner(16786, 338, 1779, 1000000);
@@ -957,11 +958,41 @@ internal static class GuidanceTests
             "sanft aufgesetzt mit " + runner.TouchdownSpeed.ToString("0.00") + " m/s");
         Check(runner.TouchdownLateral < 3,
             "seitlich beim Aufsetzen " + runner.TouchdownLateral.ToString("0.00") + " m/s");
-        Check(runner.IgnitionClearance > 8000,
-            "der schnelle Seitwaerts-Eintritt zuendet weiter frueh (bei "
-            + (runner.IgnitionClearance < 0 ? "keiner" : runner.IgnitionClearance.ToString("0") + " m")
-            + ") - eine spaetere Zuendung war am 24.09.2026 der Absturz");
-        Check(used < 8, "Brennstoff fuer den Anflug: " + used.ToString("0.00") + " t");
+        // The burn belongs near the ground, where the air has already taken the sideways speed out and
+        // the engine can point where it is told.
+        Check(runner.IgnitionClearance > 0 && runner.IgnitionClearance < 8000,
+            "Zuendung erst unten bei "
+            + (runner.IgnitionClearance < 0 ? "keiner" : runner.IgnitionClearance.ToString("0") + " m"));
+        Check(used < 10, "Brennstoff fuer den Anflug: " + used.ToString("0.00") + " t");
+    }
+
+    // The state that crashed. On 24.09.2026 at 09:07 a 27.6 t booster crossed 4280 m at 856 m/s: 321
+    // m/s down, 794 m/s sideways, 243 kPa of dynamic pressure. It lit its engines there, held 10 to
+    // 18 % thrust for three kilometres because the forecast of that day believed the commanded axis
+    // held, and hit the ground at 111 m/s.
+    //
+    // With the axis-aware command the same state is landable, and this is the check that it stays
+    // that way: the forecast must promise a soft arrival AND the flight must deliver it. The burn
+    // starts below 5 km - where the air has taken the sideways speed down far enough that the engine
+    // can point where it is told - and lands on 8.8 t of the 13 t in the tanks.
+    private static void TestTheCrashedStateLandsWithTheAxisAwareBurn()
+    {
+        Console.WriteLine("-- Zustand des Absturzes 09:07 (27,6 t, 856 m/s aus 4,3 km)");
+        GuidanceRunner runner = MakeRunner(4280, 321, 794, 1000000);
+        runner.Mass = 27600; runner.DryMass = 14400;
+        runner.World.DragArea = 4.7;
+        double startMass = runner.Mass;
+        runner.Fly(0.05, 300);
+        double used = (startMass - runner.Mass) / 1000;
+        Console.WriteLine("     " + runner.Trace() + " verbraucht=" + used.ToString("0.00") + " t");
+        True(runner.Landed, "aufgesetzt");
+        Check(runner.TouchdownSpeed > 0 && runner.TouchdownSpeed <= 8,
+            "sanft aufgesetzt mit " + runner.TouchdownSpeed.ToString("0.00") + " m/s (geflogen wurden 111)");
+        Check(runner.TouchdownLateral < 3,
+            "seitlich beim Aufsetzen " + runner.TouchdownLateral.ToString("0.00") + " m/s");
+        Check(runner.IgnitionClearance > 0 && runner.IgnitionClearance < 5000,
+            "Zuendung erst unten bei "
+            + (runner.IgnitionClearance < 0 ? "keiner" : runner.IgnitionClearance.ToString("0") + " m"));
     }
 
     // ---------------------------------------------------------------- helpers
@@ -1153,12 +1184,14 @@ internal static class GuidanceTests
         TestIgnitionDecisionIsSane();
         TestForecastPhysics();
         TestDeferredForecast();
-        TestHeavySidewaysEntryKeepsItsEarlyBurn();
+        TestHeavySidewaysEntryBrakesLateAndHard();
+        TestTheCrashedStateLandsWithTheAxisAwareBurn();
         Console.WriteLine(failures == 0 ? "Alle Guidance-Tests bestanden."
             : failures + " Guidance-Tests fehlgeschlagen.");
         return failures == 0 ? 0 : 1;
     }
 }
+
 
 
 

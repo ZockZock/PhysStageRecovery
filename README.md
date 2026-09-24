@@ -1,4 +1,4 @@
-# PhysStageRecovery 0.9.17 — KSP 1.12.5
+# PhysStageRecovery 0.9.20 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
@@ -481,3 +481,73 @@ Der Flug vom 09:07 (27,6 t) im Einzelnen: Zündung bei 4274 m mit 320 m/s Sink u
 Dieser Flug wäre mit 0.9.15 genauso aufgeschlagen: Sein Zustand ergibt bei enger wie bei weiter Grenze denselben Plan bei etwa 4,1 km (dort als Ersatzplan, weil kein Kandidat das Auffangfenster traf). Die weite Grenze war also nicht die Ursache dieses Aufschlags - sie hätte nur die beiden Eintritte, die landen, auf denselben ungeprüften späten Burn verschoben.
 
 Was der Vorhersage fehlt, ist das Modell der Schubachse. Sie fliegt jeden Versuch entlang des befohlenen Vektors, weshalb sie für einen späten Burn ein weiches Aufsetzen berechnet, das das Fahrzeug nicht fliegen kann. Dasselbe gilt für die Sinkratenleiter, deren erreichbare Verzögerung ebenfalls senkrechten Schub annimmt. Solange beides fehlt, ist die enge Auffanggrenze die sichere Zahl. Der Testfall dazu steht als `TestHeavySidewaysEntryKeepsItsEarlyBurn` in der Testdatei und hält die frühe Zündung fest (gemessen 10403 m, Aufsetzen 5,64 m/s, 0,62 m/s seitlich, 5,7 t Treibstoff).
+
+Dieser Stand ist als Baseline eingefroren: `build/backups/baseline-0.9.17-20260924-092207` mit Prüfsummen in `SHA256SUMS.txt`, beschrieben in `docs/BASELINE-0.9.17.md`. Nach dem Flug vom 24.09.2026 zündet der schwere Booster damit wieder früh und landet.
+## 0.9.18: Vorhersage kennt die Schubachse
+
+Die Vorausberechnung setzt den Triebwerksschub jetzt in die Richtung, in die das Fahrzeug ihn tatsächlich bringt. Oberhalb eines Staudrucks von 40 kPa gehört das Heck dem Luftstrom: Der Booster fliegt den relativen Wind, also bremst das Triebwerk entlang der Flugbahn, statt den Sinkflug zu tragen. Darunter wird der Befehl wieder bestimmend, sodass der langsame, tiefe Teil eines Versuchs - der Teil, der landet - unverändert bleibt.
+
+Die Zahlen stammen aus den Flügen vom 24.09.2026. Der Lagefehler im Log entsprach genau dem Winkel zwischen Befehl und Flugbahn: 74 Grad bei 15 km, 63 Grad bei 3,8 km, und er fiel erst auf null, als die Luft ihren Impuls verloren hatte - 0,3 Grad bei 738 m und 21 kPa beim 26,4-t-Booster, 1,5 Grad bei 648 m und 46 kPa beim 27,6-t-Booster. Die 40 kPa liegen zwischen beiden Messungen, auf der vorsichtigen Seite: Eine zu düstere Vorhersage zündet nur früher, und früh zünden ist das, was diese Eintritte landet; eine zu optimistische fliegt sie in den Boden.
+
+Rückrechnung der vier aufgezeichneten Flüge mit dem neuen Modell, geschlossen und mit den Atmosphären-, Schub- und Widerstandstabellen der jeweiligen CSV:
+
+| Flug | echte Zündung | echtes Ergebnis | Modell: Zündung | Modell: Aufsetzen |
+|---|---|---|---|---|
+| 08:39, 26,4 t | 16786 m | 5,5 m/s, gelandet | 26137 m | 5,9 m/s |
+| 09:07, 27,6 t | 4274 m | 111 m/s, **Aufschlag** | 29792 m | 5,9 m/s |
+| 08:06, 27,6 t | 24048 m | 6,3 m/s, gelandet | 32270 m | 5,8 m/s |
+| 08:11, 4,8 t | 1571 m | 7,4 m/s, gelandet | 1316 m | 5,9 m/s |
+
+Der Aufschlagflug wird damit gerettet: Das Modell erkennt, dass kein Zündpunkt ab 4 km noch reicht, und zündet bei 29,8 km, wo die Luft die Seitwärtsfahrt noch rechtzeitig herausnimmt. Die drei anderen landen weiterhin, der kleine Booster praktisch unverändert.
+
+Neuer Test `TestForecastKnowsTheThrustAxisIsNotItsOwn`: Für den Zustand des Aufschlags (27,6 t, 4280 m, 321 m/s Sink, 794 m/s seitlich) muss die Vorhersage ein hartes Aufsetzen melden. Sie sagt 139,7 m/s voraus, geflogen wurden 111 m/s - vorher stand dort "weich, 6,0 m/s".
+
+Noch nicht geändert ist die Befehlsseite: Der Regler fordert weiterhin den kleinen senkrechten Schub an, der in Wahrheit rückwärts wirkt. Die Sinkratenleiter nimmt also nach wie vor senkrechten Schub als erreichbare Verzögerung an. Sie zu lehren, den Schub als das zu benutzen, was er ist - eine Bremse entlang der Flugbahn -, ist der nächste Schritt; er würde die frühe Zündung verkürzen statt sie nur ehrlich zu machen.
+## 0.9.19: Volllastbremsung bis 50 m, dann Auslaufen auf die Aufsetzgeschwindigkeit
+
+Der Bremsbefehl ist jetzt das, was er physikalisch ist. Bis zur Auffanghöhe (50 m) arbeitet der Hauptburn mit **voller Schubleistung** und zielt so, dass im 50-m-Punkt genau die Auffanggeschwindigkeit senkrecht und **keine Seitwärtsfahrt** mehr übrig ist. Unterhalb übernimmt die Endphase und läuft die Sinkrate vom Auffangwert auf die Aufsetzgeschwindigkeit aus. Die alte Sinkratenleiter mit Teilschub ist damit keine Führungsgröße mehr, sondern nur noch die Obergrenze, gegen die die Endphase nachgeführt wird.
+
+Dazu gehört die Schubachse, und die war in 0.9.18 nur der Vorhersage bekannt, nicht dem Befehl. Solange der Luftstrom das Heck hält, geht ein senkrechter Befehl als Schub entlang der Flugbahn raus. Der Regler zielt deshalb im Mittel aus dem, was er will, und dem, was die Luft zulässt, und lässt das Triebwerk in dieser Phase mit voller Leistung laufen: In der Phase kann der Burn nur Fahrt herausnehmen, und jeder zurückgehaltene Newton wird mit Zündhöhe bezahlt. Beide Komponenten sind dabei begrenzt - der Bahnschub darf die Sinkrate nicht ganz wegnehmen (sonst hängt der Booster am eigenen Triebwerk, gemessen: 600 s Stillstand in 31 km mit 20 t Treibstoff über Bord) und die Drift nicht über null hinaus drücken.
+
+Rückrechnung der fünf aufgezeichneten Flüge mit den Tabellen der jeweiligen CSV:
+
+| Flug | Zündung | Drossel mittel/max | Sink bei 50 m | Aufsetzen sink/quer | Treibstoff |
+|---|---|---|---|---|---|
+| 08:39, 26,4 t | 1738 m | 37 % / 97 % | 5,3 m/s | 5,6 / 0,44 m/s | 3,5 t |
+| 09:07, 27,6 t (**Absturz**) | 4769 m | 35 % / 100 % | 5,0 m/s | 5,6 / 0,08 m/s | 8,8 t |
+| 08:06, 27,6 t | 2118 m | 41 % / 100 % | 5,3 m/s | 5,6 / 0,44 m/s | 1,8 t |
+| 08:12, 20,3 t | 3804 m | 31 % / 100 % | 5,1 m/s | 5,6 / 0,11 m/s | 3,7 t |
+| 08:11, 4,8 t | 1667 m | 32 % / 83 % | 5,3 m/s | 5,6 / 0,28 m/s | 0,5 t |
+
+Alle fünf landen weich, auch der Zustand, der am 09:07 aufgeschlagen ist. Die Zündung liegt jetzt dort, wo der volle Schub gebraucht wird, statt 15 km darüber, und der 26,4-t-Fall braucht 3,5 t statt 4,5 t wie im echten Flug.
+
+Zwei Tests halten das fest: `TestHeavySidewaysEntryBrakesLateAndHard` (26 t mit 1779 m/s Seitwärtsfahrt: Zündung unter 8000 m, weiches Aufsetzen) und `TestTheCrashedStateLandsWithTheAxisAwareBurn` (der Zustand des Aufschlags landet: Zündung bei 3315 m, Aufsetzen 5,56 m/s).
+
+Was noch offen ist: Das Triebwerk schaltet weiterhin 1,5 m über dem Boden ab, der Booster fällt dieses Stück frei. Deshalb steht im Log als Aufsetzgeschwindigkeit rund 5,6 m/s, obwohl die Endphase auf 2 m/s ausläuft. Wer 2 m/s beim Kontakt will, muss die Abschalthöhe senken; das macht die Landung empfindlicher gegen die Höhenmessung.
+## 0.9.20: Spätere Zündung bei Eintritten mit viel Seitwärtsfahrt
+
+Die Flüge vom 24.09.2026 um 09:51 und 09:56 zeigten beide Booster mit einer Zündung, die etwas zu hoch lag, gefolgt von einem langen, flachen Sinkflug bei 30 bis 50 % Schub. Beim schweren Booster lief die Volllastphase nur von 4,2 km bis 2,2 km, danach modulierte der Regler 48 s lang herunter - 7,9 t Treibstoff für eine Landung.
+
+Die Ursache stand in der Kandidatenliste des Planers für den Zustand bei 2,5 km. Jeder Zündpunkt wurde nur wegen der seitlichen Auffanggrenze verworfen, nicht wegen des Aufsetzens:
+
+```
+i= 2 h=2202 m  Aufsetzen 6,0 m/s  quer bei 50 m 3,58 m/s
+i= 1 h=2348 m  Aufsetzen 5,9 m/s  quer bei 50 m 2,67 m/s
+i= 0 h=2497 m  Aufsetzen 5,8 m/s  quer bei 50 m 2,05 m/s   <- allesamt über der Grenze von 1,0 m/s
+```
+
+Mit 1,0 m/s als Grenze bleibt kein Kandidat unter 4,4 km übrig, also zündet der Planer dort. Die Grenze ist auf 4,5 m/s erweitert - und das ist kein Zufallsschritt, denn der Burn zielt ohnehin immer auf null Seitwärtsfahrt; die Grenze entscheidet nur, welchen Zündpunkt der Planer akzeptiert. Genau das war 0.9.16 schon einmal versucht worden und musste zurückgenommen werden, weil die Vorhersage damals die Schubachse nicht kannte und einen Burn plant, den das Fahrzeug nicht fliegen konnte. Seit 0.9.18 kennt sie die Achse, seit 0.9.19 benutzt der Befehl sie - damit ist die Grenze wieder eine reine Qualitätsfrage.
+
+Rückrechnung der drei jüngsten Flüge, Übergabe an die Regelung in 60 km Höhe (also das, was im Spiel passiert), mit den Tabellen der jeweiligen CSV:
+
+| Flug | Zündung vorher | Treibstoff vorher | Zündung jetzt | Treibstoff jetzt |
+|---|---|---|---|---|
+| 09:51, 27,6 t | 4397 m | 5,10 t | **3161 m** | **4,02 t** |
+| 09:56, 4,8 t | 1664 m | 0,76 t | **1314 m** | **0,67 t** |
+| 09:07, 27,6 t (Absturzzustand) | 4769 m | 9,15 t | **2555 m** | **5,84 t** |
+
+Alle drei landen weiterhin weich (5,6 m/s, 0,2 bis 0,5 m/s Restdrift), auch der Zustand des Aufschlags. Mehr als 4 m/s Grenze ändert nichts mehr, ab dort entscheiden Aufsetzgeschwindigkeit und Endphase über den Zündpunkt.
+
+Im Spiel bestätigt: sechs Flüge mit 0.9.20. Die mittleren Booster zünden bei 1,1 bis 1,6 km statt bei 4,3 km, der schwere Fall (48,4 t, 1883 m/s Seitwärtsfahrt) hält von 16 km bis 2 km durchgehend 100 % Schub und moduliert erst im letzten Kilometer herunter. Aufgesetzt wird mit 5,4 bis 6,9 m/s und 0,3 bis 2,0 m/s Restdrift.
+
+Dieser Stand ist als Baseline eingefroren: `build/backups/baseline-0.9.20-20260924-103455` mit Prüfsummen in `SHA256SUMS.txt`, beschrieben in `docs/BASELINE-0.9.20.md`. Die Baseline 0.9.17 von 09:22 liegt unverändert daneben.

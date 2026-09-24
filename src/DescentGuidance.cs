@@ -313,7 +313,6 @@ namespace BoosterWatch.Guidance
             if (burning)
             {
                 double budget = Math.Max(0.05, free);
-                double distance = Math.Max(0.5, clearance - cutoff);
                 double drag = state.DragValid ? Math.Max(0, state.DragAcceleration) : 0;
                 // Only the vertical component supports weight. Sideways drag is not lift.
                 double speed = Math.Sqrt(sink * sink + lateral * lateral);
@@ -323,34 +322,20 @@ namespace BoosterWatch.Guidance
                 // staying dark: the term is subtracted from gravity, so a bogus reading of a few
                 // hundred m/s^2 zeroes the command outright.
                 if (drag > 5 * gravity) drag = 5 * gravity;
-                // The profile is the FASTEST descent the law allows, not a rate to be tracked from
-                // underneath. Braking to get down to the ladder is what it is for; adding thrust while
-                // the booster is already slower than the ladder holds it up exactly where it is. That
-                // is not a small error either: lit below the ladder, the law hovers - measured in the
-                // entry from the second flight, sink rate zero for 600 s at 31 km with 20 t of
-                // propellant going overboard - and the same thing one step lower down is a booster
-                // that lights up "far too early" and then has nothing left for the landing.
+                // Below the capture altitude the descent is held ON the profile, not merely capped by
+                // it: the capture speed at the capture altitude, tapered to the touchdown speed at the
+                // height where the engines are cut. Tracking it is the whole job here - the braking
+                // burn has already put the booster on the clock, and from there a proportional term
+                // keeps it there.
                 //
-                // Below the ladder the engines stay dark and gravity does the work of closing the gap;
-                // the moment the sink rate reaches the ladder, the deceleration term takes over.
-                if (sink >= target)
-                {
-                    double requirement = 0.5 * (sink * sink - target * target) / distance;
-                    // And a term that pays for the deviation itself. `requirement` above only knows
-                    // how much longer the ground is, so a booster two and a half times above its
-                    // ladder is asked for a few m/s^2 and drifts down to meet it at the ground - the
-                    // recorded flight touched down at 29 m/s that way, with the law commanding 24 %
-                    // and the air supplying the rest. On the ladder this term is zero, so a descent
-                    // that is already tracking it flies exactly as before.
-                    double tracking = config.Control.LadderGain * (sink - target);
-                    // The steep braking profile itself requires deceleration even at zero
-                    // tracking error. Without feed-forward the burn lags the profile by
-                    // tens of m/s and every trial incorrectly rejects the 100 m handover.
-                    if (clearance > config.Predictor.CaptureAltitude)
-                        tracking += 0.8 * budget;
-                    if (tracking > requirement) requirement = tracking;
-                    verticalCommand = Math.Max(0, gravity - drag + Math.Min(budget, requirement));
-                }
+                // The rule used to be "brake only while the sink rate is above the ladder", with the
+                // engines dark underneath it. That is right while the law is flying a descent it means
+                // to fall through, and wrong for the last hundred metres: a booster handed over at the
+                // capture speed IS on the ladder, so nothing braked, and the capture speed became the
+                // landing speed - measured, 5 m/s of capture arrived as 5.8 m/s at contact.
+                double error = sink - target;
+                verticalCommand = Math.Max(0, gravity - drag
+                    + Math.Min(budget, error / Math.Max(0.1, config.Control.FlareResponse)));
             }
 
             // A booster that has stopped descending is not to be held up. `deceleration` above is
@@ -457,6 +442,12 @@ namespace BoosterWatch.Guidance
                 lateralCommand = Clamp(lateralCommand, lastLateralAcceleration - allowed, lastLateralAcceleration + allowed);
             }
 
+            // A command that was zeroed above stays zeroed. The rate limit smooths ordinary steering;
+            // it must not put back a burn that was just called off. Measured in the harness: a booster
+            // that went from a 20 m/s^2 lean to climbing kept a third of that lean for a second,
+            // because the limit pulled the zero back up towards the last command.
+            if (rising || verticalCommand <= 1e-9) lateralCommand = 0;
+
             // There used to stand here: "if the lateral controller is working at all, raise the
             // vertical command to local gravity". The thought behind it is that a leaning booster
             // spends part of its thrust sideways and must not lose height over it. What it actually
@@ -476,12 +467,13 @@ namespace BoosterWatch.Guidance
             double captureVertical = 0, captureLateral = 0;
             bool emergency = false;
             if (burning && !rising)
-                CaptureBraking.Command(state, config, cutoff, out captureVertical, out captureLateral, out emergency);
-            // Keep the proven slow terminal controller. Fast arrivals, including ones already
-            // below the terminal altitude, must first shed BOTH components of their velocity.
-            bool vectorBraking = burning && !rising && (clearance > config.Predictor.CaptureAltitude
-                || sink > config.Predictor.CaptureSpeed + 3
-                || lateral > config.Predictor.CaptureLateralSpeed || emergency);
+                CaptureBraking.Command(state, config, out captureVertical, out captureLateral, out emergency);
+            // The braking burn owns everything above the capture altitude. Below it the terminal phase
+            // takes over on the profile the ladder describes: from the capture speed at the capture
+            // altitude down to the touchdown speed at the cut-off height. An arrival below it that is
+            // still fast is caught by that same profile - it brakes hard whenever the sink rate is
+            // above the ladder - so the capture command does not reach into the last metres.
+            bool vectorBraking = burning && !rising && clearance > config.Predictor.CaptureAltitude;
             if (vectorBraking)
             {
                 verticalCommand = captureVertical; lateralCommand = captureLateral;
@@ -491,9 +483,11 @@ namespace BoosterWatch.Guidance
                     double change = config.Control.MaxLateralAccelerationChange * Math.Max(0.01, deltaTime / 0.02);
                     lateralCommand = Clamp(lateralCommand, Math.Max(0, lastLateralAcceleration - change), lastLateralAcceleration + change);
                 }
-                // Commands and throttle must describe the same physically available vector.
+                // Commands and throttle must describe the same physically available vector. The whole
+                // engine is used: the burn is a braking manoeuvre, and what it holds back is paid for
+                // with the height it has to start at.
                 double magnitude = Math.Sqrt(verticalCommand * verticalCommand + lateralCommand * lateralCommand);
-                double budget = thrustAcceleration * (emergency ? 1 : 1 - config.Predictor.ThrustReserve);
+                double budget = thrustAcceleration;
                 if (magnitude > budget && magnitude > 1e-9)
                 { verticalCommand *= budget / magnitude; lateralCommand *= budget / magnitude; }
                 output.EmergencyBraking = emergency;

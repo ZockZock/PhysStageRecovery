@@ -1,4 +1,17 @@
+# Bau-Ausgabe und Zwischendateien
 build/
 obj/
+dist/
 *.user
 *.pdb
+
+# Ausgelieferte Archive (jederzeit aus dem Quelltext reproduzierbar)
+*.zip
+
+# Prüfsummenlisten der eingefrorenen Schnappschüsse
+SHA256SUMS.txt
+
+# Editor- und Werkzeugordner
+.vs/
+.idea/
+*.suo
