@@ -1,8 +1,35 @@
-# PhysStageRecovery 0.9.35 — KSP 1.12.5
+# PhysStageRecovery 0.9.36 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
 **MechJeb muss weder installiert noch als Bauteil am Booster vorhanden sein.** Die benötigten Algorithmen sind im eigenen Plugin enthalten. Erforderlich ist weiterhin Harmony 2 unter `GameData/000_Harmony/0Harmony.dll`.
+
+## 0.9.36: „Ziel-Sinken" im Fenster ist jetzt wirklich das Ziel
+
+Das Fenster schrieb `landingSpeed`, das vorausberechnete Landegesetz las dagegen seinen eigenen
+Schlüssel `touchdownSpeed`. Beide wurden **einmal** gleichgesetzt — beim Umstieg auf das neue Gesetz —
+und konnten danach auseinanderlaufen: Das Fenster zeigte 5 m/s, der Booster zielte auf 2 m/s. Wer im
+Fenster etwas verstellt hat, hat damit nichts verstellt.
+
+Jetzt gibt es **nur noch eine Zahl**: `Settings.TouchdownSpeed` ist eine Eigenschaft auf
+`LandingSpeed`, der alte Schlüssel wird beim Laden entfernt (`configVersion 7`) und nicht mehr
+geschrieben. Auseinanderlaufen ist damit nicht mehr möglich — nicht durch Disziplin, sondern durch den
+Typ.
+
+**Was der Wert steuert:** den **Anker der Sinkratenleiter** — wie schnell der Booster im Anflug sinken
+darf, woraus sich der Zündzeitpunkt und damit der Treibstoffbedarf ergeben. Die letzten Meter bleiben
+unberührt: unter 15 m läuft die Sinkrate auf 1,5 m/s aus (`SoftFlareAltitude`, `SoftTouchdownSpeed`),
+und 1,5 m über dem Boden wird der Schub ganz genommen (`EngineCutoffAltitude`), weshalb die
+Aufsetzgeschwindigkeit ohnehin über dem Zielwert liegt.
+
+**Folge für diese Installation:** Hier stehen 5 m/s im Fenster, also fliegt der Booster ab jetzt einen
+steileren Anflug als in den Flügen bis 0.9.35 (die mit 2 m/s geflogen sind — die 2 stand nur in
+`settings.cfg`). Wer es wieder sanfter will, stellt im Fenster 2–3 m/s ein; der Wert gilt dann auch
+wirklich.
+
+7 neue Prüfungen in `tests/KspSettingsTests.cs` (56 statt 49): das Fenster gewinnt gegen den alten
+Schlüssel, der alte Schlüssel verschwindet aus der Datei, eine gesetzte Zahl überlebt das Neuladen, und
+die Datei trägt danach `configVersion = 7`.
 
 ## 0.9.35: Der Vorhalt greift nur um Kerbin
 
@@ -759,12 +786,12 @@ Alle in `GameData/PhysStageRecovery/PluginData/settings.cfg`, bei geschlossenem 
 | Schlüssel | Standard | Bedeutung |
 |---|---|---|
 | `guidanceMode` | `predictive` | `legacy` = alte MechJeb-Kette |
-| `touchdownSpeed` | 5 | Zielsinkrate der letzten Meter [m/s] |
+| `landingSpeed` | 0,5 | **Ziel-Sinken** — im Fenster einstellbar; Anker der Sinkratenleiter [m/s]. Seit 0.9.36 der einzige Schlüssel dafür (früher `touchdownSpeed`) |
 | `terminalAltitude` | 50 | Höhe über Grund, ab der senkrecht gesunken wird [m] |
 | `tiltLimit` | 20 | größte Neigung beim Bremsen [Grad] |
 | `thrustReserve` | 0,2 | Anteil des Schubs, der für Lageregelung und Zündverzug zurückgehalten wird |
 
-`touchdownSpeed` und `terminalAltitude` sind die beiden Werte, die die Landung am stärksten prägen.
+`landingSpeed` (im Fenster „Ziel-Sinken") und `terminalAltitude` sind die beiden Werte, die die Landung am stärksten prägen.
 
 Die Statuszeile im Flugübersichtsfenster zeigt während der Triebwerkslandung Phase, Zielsinkrate, **voraussichtliche Aufsetzgeschwindigkeit**, **Reserve** und Schub. Die Reserve ist die Zahl, an der ein Fehlflug zuerst ablesbar ist: Sie wird kleiner, bevor etwas schiefgeht, und `Landing predict` im Log nennt dieselbe Zahl mit allen anderen Entscheidungswerten.
 

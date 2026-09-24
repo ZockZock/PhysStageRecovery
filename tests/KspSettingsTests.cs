@@ -83,6 +83,24 @@ class KspSettingsTests
         Check(independent.HeatImmune, "A config written before the option existed gets heat protection by default");
         independent.Save();
         Check(!File.ReadAllText(standalone).Contains("useMechJeb"), "Obsolete dependency toggle is removed on save");
+
+        // One number for the landing target: the window writes landingSpeed, the predictive law reads
+        // the target. Until 0.9.36 those were two keys, so the window could show 5 m/s while the
+        // booster aimed at 2 - the value the player sets has to win.
+        string target = System.IO.Path.Combine(dir, "target.cfg");
+        File.WriteAllText(target, "PhysStageRecovery\n{\n configVersion = 6\n landingSpeed = 4\n touchdownSpeed = 12\n}\n");
+        Settings picked = Settings.Load(target);
+        Check(picked.LandingSpeed == 4, "The window's target sink wins over the retired second key");
+        Check(picked.TouchdownSpeed == 4, "The landing law reads exactly the value the window shows");
+        picked.TouchdownSpeed = 3;
+        Check(picked.LandingSpeed == 3, "Moving the target moves the window's value with it");
+        Check(picked.Save(), "The straightened target saves");
+        string saved = File.ReadAllText(target);
+        Check(!saved.Contains("touchdownSpeed"), "The retired second key is removed from the file");
+        Check(saved.Contains("configVersion = 7"), "Settings are marked as straightened");
+        Settings again = Settings.Load(target);
+        Check(again.TouchdownSpeed == 3 && again.LandingSpeed == 3,
+            "One target survives a reload, from one key");
         Check(!restored.AutoStage && !restored.PoweredLanding, "New automation is disabled for existing installations");
         restored.AutoStage = true; restored.LastAutoStage = 2; restored.AutoStageHeight = 4200;
         restored.PoweredLanding = true; restored.LandingSpeed = 1.5;
@@ -108,7 +126,8 @@ class KspSettingsTests
             "Obsolete virtual recovery settings are absent after migration");
         // The predictive landing law brought its own keys. An installation that predates them must
         // get them written out, and the target speed it had configured must come across: losing it
-        // would silently change how hard every existing booster lands.
+        // would silently change how hard every existing booster lands. The target itself is the one
+        // key the window writes - a second one would drift away from it again.
         string legacyLanding = System.IO.Path.Combine(dir, "legacy-landing.cfg");
         File.WriteAllText(legacyLanding,
             "PhysStageRecovery\n{\n configVersion = 4\n poweredLanding = True\n landingSpeed = 3.5\n}\n");
@@ -118,9 +137,9 @@ class KspSettingsTests
         Check(carried.GuidanceMode == GuidanceMode.Predictive,
             "An installation without the key flies the predictive law by default");
         string landingText = File.ReadAllText(legacyLanding);
-        Check(landingText.Contains("guidanceMode") && landingText.Contains("touchdownSpeed")
+        Check(landingText.Contains("guidanceMode") && landingText.Contains("landingSpeed")
             && landingText.Contains("terminalAltitude") && landingText.Contains("tiltLimit")
-            && landingText.Contains("thrustReserve"),
+            && landingText.Contains("thrustReserve") && !landingText.Contains("touchdownSpeed"),
             "The new landing settings are written into the file for the player to edit");
         Settings chosen = Settings.Load(legacyLanding);
         chosen.GuidanceMode = GuidanceMode.Legacy; chosen.TouchdownSpeed = 2.5; chosen.TerminalAltitude = 120;

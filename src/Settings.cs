@@ -29,9 +29,16 @@ namespace BoosterWatch
         public bool HeatImmune = true;
         public int LastAutoStage = 0;
         public double AutoStageHeight = 5000, LandingSpeed = 0.5;
-        // What the predictive law aims for at the ground and where the vertical final phase starts.
-        // Both are settings, as asked for: the last 50 m at 5 m/s by default.
-        public double TouchdownSpeed = 5, TerminalAltitude = 50;
+        // What the predictive law aims for at the ground.
+        //
+        // Deliberately not a field of its own: until 0.9.36 the law read its own key
+        // (`touchdownSpeed`) while the window wrote `landingSpeed`, and the two were only equalised
+        // once, when the law was introduced. The window could therefore show 5 m/s while the booster
+        // aimed at 2. Now the value the player sets in the window *is* the target, by construction -
+        // there is no second number that could drift away from it.
+        public double TouchdownSpeed { get { return LandingSpeed; } set { LandingSpeed = value; } }
+        // Where the vertical final phase starts.
+        public double TerminalAltitude = 50;
         public double CaptureAltitude = 100;
         // How far the booster may lean over while it brakes, and how far above local gravity the
         // engines are allowed to be commanded. The reserve is what stays available for attitude
@@ -85,7 +92,6 @@ namespace BoosterWatch
                 s.LastAutoStage = (int)Read(n, "lastAutoStage", 0, 0, 100);
                 s.AutoStageHeight = Read(n, "autoStageHeight", 5000, 50, 70000);
                 s.LandingSpeed = Read(n, "landingSpeed", 0.5, 0.5, 5);
-                s.TouchdownSpeed = Read(n, "touchdownSpeed", 5, 0.5, 15);
                 s.TerminalAltitude = Read(n, "terminalAltitude", 50, 1, 1000);
                 s.CaptureAltitude = Read(n, "captureAltitude", 100, 10, 5000);
                 s.TiltLimit = Read(n, "tiltLimit", 20, 1, 80);
@@ -94,7 +100,7 @@ namespace BoosterWatch
                 if (!string.IsNullOrEmpty(mode))
                     s.GuidanceMode = mode.Trim().ToLowerInvariant() == "legacy" ? GuidanceMode.Legacy : GuidanceMode.Predictive;
                 s.ChuteHeight = Read(n, "chuteHeight", 1000, 100, 20000);
-                double version = Read(n, "configVersion", 1, 1, 6);
+                double version = Read(n, "configVersion", 1, 1, 7);
                 if (version < 2)
                 {
                     // Upgrade only the old defaults. Preserve explicitly customized limits.
@@ -110,7 +116,7 @@ namespace BoosterWatch
                     if (n.HasValue("landingSpeed")) s.TouchdownSpeed = s.LandingSpeed;
                     s.Save();
                 }
-                else if (version < 6 || !n.HasValue("captureAltitude")) s.Save();
+                else if (version < 7 || !n.HasValue("captureAltitude")) s.Save();
             }
             catch (Exception e) { Debug.LogError("[PhysStageRecovery] Settings: " + e); }
             return s;
@@ -129,7 +135,9 @@ namespace BoosterWatch
                 n.name = "PhysStageRecovery";
                 n.RemoveValues("useMechJeb");
                 n.RemoveValues("requireTouchdown"); n.RemoveValues("recoveryHeight"); n.RemoveValues("touchdownSeconds");
-                Set(n, "configVersion", 6); Set(n, "physicsRangeKm", PhysicsRange / 1000);
+                // The retired second key for the landing target: the window's value is the target now.
+                n.RemoveValues("touchdownSpeed");
+                Set(n, "configVersion", 7); Set(n, "physicsRangeKm", PhysicsRange / 1000);
                 Set(n, "maxBoosters", MaxBoosters); Set(n, "cameraFps", CameraFps);
                 n.SetValue("autoArm", AutoArm.ToString(), true);
                 n.SetValue("autoStage", AutoStage.ToString(), true);
@@ -147,7 +155,6 @@ namespace BoosterWatch
                 n.SetValue("heatImmune", HeatImmune.ToString(), true);
                 Set(n, "lastAutoStage", LastAutoStage); Set(n, "autoStageHeight", AutoStageHeight);
                 Set(n, "landingSpeed", LandingSpeed);
-                Set(n, "touchdownSpeed", TouchdownSpeed);
                 Set(n, "terminalAltitude", TerminalAltitude);
                 Set(n, "captureAltitude", CaptureAltitude);
                 Set(n, "tiltLimit", TiltLimit);
