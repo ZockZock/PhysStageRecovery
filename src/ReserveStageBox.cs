@@ -27,12 +27,12 @@ namespace BoosterWatch
     public sealed partial class BoosterWatchFlight
     {
         private const string HatchName = "PhysStageRecoveryReserve";
-        private static Texture2D stripeTexture;
+        private static Sprite stripeSprite;
 
         private sealed class BoxMark
         {
             public StageIconInfoBox Box;
-            public RawImage Hatch;
+            public Image Hatch;
             public Slider Slider;
             public RectTransform Track;
         }
@@ -41,22 +41,40 @@ namespace BoosterWatch
         private string boxNote = "";
         private bool boxReported;
 
-        private static Texture2D StripeTexture()
+        // The stripe pattern with the left side rounded like the stock bar: one sprite, whose left border
+        // carries the rounding (that border is never tiled) and whose 8 px middle is one seamless stripe
+        // period, so an Image in Tiled mode keeps the corners fixed and repeats the stripes.
+        private static Sprite StripeSprite()
         {
-            if (stripeTexture != null) return stripeTexture;
-            const int size = 8;
-            Texture2D texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            if (stripeSprite != null) return stripeSprite;
+            const int height = 8;          // one seamless period, so tiling vertically stays invisible
+            const int corner = 3;          // radius of the two left corners
+            const int width = corner + height;
+            Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
             texture.name = "PhysStageRecovery.ReserveStripe";
             texture.hideFlags = HideFlags.HideAndDontSave;
             texture.wrapMode = TextureWrapMode.Repeat;
-            texture.filterMode = FilterMode.Point;
-            Color stripe = new Color(0.40f, 0.89f, 0.76f, 0.85f);
-            Color background = new Color(0.05f, 0.12f, 0.13f, 0.85f);
-            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
-                texture.SetPixel(x, y, (x + y) % size < 3 ? stripe : background);
+            texture.filterMode = FilterMode.Bilinear;
+            Color stripe = new Color(0.40f, 0.89f, 0.76f, 0.78f);
+            Color background = new Color(0.05f, 0.12f, 0.13f, 0.78f);
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                {
+                    Color color = (x + y) % height < 3 ? stripe : background;
+                    if (x < corner)
+                    {
+                        float dx = corner - (x + 0.5f);
+                        float dy = Mathf.Min(corner - (y + 0.5f), corner - (height - y - 0.5f));
+                        if (dy > 0f) color.a *= Mathf.Clamp01(corner - Mathf.Sqrt(dx * dx + dy * dy) + 0.5f);
+                    }
+                    texture.SetPixel(x, y, color);
+                }
             texture.Apply();
-            stripeTexture = texture;
-            return texture;
+            stripeSprite = Sprite.Create(texture, new Rect(0, 0, width, height), new Vector2(0f, 0.5f), 100f, 0,
+                SpriteMeshType.FullRect, new Vector4(corner, 0f, 0f, 0f));
+            stripeSprite.name = "PhysStageRecovery.ReserveStripe";
+            stripeSprite.hideFlags = HideFlags.HideAndDontSave;
+            return stripeSprite;
         }
 
         private void UpdateReserveBox()
@@ -123,15 +141,18 @@ namespace BoosterWatch
                 + (labels.Length > 0 ? labels : "keine") + "; gesucht: " + reserve.Markers + ")");
         }
 
-        private RawImage CreateHatch(RectTransform track)
+        private Image CreateHatch(RectTransform track)
         {
             try
             {
                 GameObject holder = new GameObject(HatchName);
                 holder.layer = track.gameObject.layer;
-                RawImage image = holder.AddComponent<RawImage>();
-                image.texture = StripeTexture();
-                image.color = new Color(1f, 1f, 1f, 0.9f);
+                Image image = holder.AddComponent<Image>();
+                image.sprite = StripeSprite();
+                // Tiled: the rounded left border stays as it is and the stripe period repeats, so the
+                // hatch keeps the bar's own shape whatever width the reserve has.
+                image.type = Image.Type.Tiled;
+                image.color = Color.white;
                 image.raycastTarget = false;
                 RectTransform rect = image.rectTransform;
                 rect.SetParent(track, false);
@@ -172,7 +193,6 @@ namespace BoosterWatch
                 rect.pivot = new Vector2(0.5f, 0f);
                 rect.anchoredPosition = new Vector2(0f, reverse ? height - span2 : 0f);
                 rect.sizeDelta = new Vector2(0f, span2);
-                mark.Hatch.uvRect = new Rect(0f, 0f, Mathf.Max(1f, width) / 8f, Mathf.Max(1f, span2) / 8f);
                 return;
             }
             float pixels = width * share;
@@ -181,7 +201,6 @@ namespace BoosterWatch
             rect.pivot = new Vector2(0f, 0.5f);
             rect.anchoredPosition = new Vector2(reverse ? width - pixels : 0f, 0f);
             rect.sizeDelta = new Vector2(pixels, 0f);
-            mark.Hatch.uvRect = new Rect(0f, 0f, Mathf.Max(1f, pixels) / 8f, Mathf.Max(1f, height) / 8f);
         }
 
         // The icon of the part that carries the reserve; if that part has no icon of its own (grouped or

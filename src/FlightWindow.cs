@@ -13,7 +13,7 @@ namespace BoosterWatch
         {
             float w = window.width - 36;
             GUI.Label(new Rect(18, 12, w - 120, 30), "PhysStageRecovery", windowTheme.Title);
-            GUI.Label(new Rect(window.width - 125, 17, 60, 22), "0.9.30", windowTheme.Small);
+            GUI.Label(new Rect(window.width - 125, 17, 60, 22), "0.9.31", windowTheme.Small);
             if (GUI.Button(new Rect(window.width - 48, 14, 30, 28), new GUIContent("×", "Fenster schließen"), windowTheme.Button)) SetVisible(false);
             GUI.Label(new Rect(19, 44, w, 20), "STUFEN LANDEN. MISSION FORTSETZEN.", windowTheme.Small);
 

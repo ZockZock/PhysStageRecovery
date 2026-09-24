@@ -1,4 +1,4 @@
-# PhysStageRecovery 0.9.30 — KSP 1.12.5
+# PhysStageRecovery 0.9.31 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
@@ -35,6 +35,19 @@ Beim Start steht die Kontrolle in `KSP.log`:
 Steht dort weniger, fehlt an einem Teil der Regler — das Log meldet es dann als Fehler, und ein dort
 gesetzter Vorhalt überlebt Werkstatt und Rampe nicht. Triebwerke ohne Abschaltung (Feststoffbooster)
 bekommen den Regler weiterhin nicht zu sehen.
+
+## 0.9.31: Die Schraffur hat die Ecken des Originalbalkens
+
+Die linken Ecken des Balkens kommen aus seinem Sprite. Die Schraffur bekommt deshalb einen eigenen
+Sprite, dessen **linker Rand die Rundung trägt** (dieser Rand wird nie gekachelt) und dessen 8 px
+breite Mitte genau eine nahtlose Streifenperiode ist. Als `Image` im **`Tiled`**-Modus bleibt die
+Rundung damit fest und die Streifen wiederholen sich — bei jedem Vorhaltanteil dieselbe Optik, und der
+rechte Rand der Schraffur bleibt eine gerade Kante, weil dort mitten im Balken die Reserve beginnt.
+
+```csharp
+Sprite.Create(texture, rect, pivot, 100f, 0, SpriteMeshType.FullRect, new Vector4(corner, 0, 0, 0));
+image.type = Image.Type.Tiled;   // linker Rand fest, Mitte gekachelt
+```
 
 ## 0.9.30: Die Reserve steht **in** der FT-Box
 
