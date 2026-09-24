@@ -1,4 +1,12 @@
 # Reproducible source extraction; input is the pinned MechJeb checkout documented in THIRD_PARTY.md.
+#
+# The checkout is deliberately NOT kept in this repository (it is 28 MB). To reproduce the port:
+#
+#   git clone https://github.com/MuMech/MechJeb2 build/mechjeb-upstream
+#   git -C build/mechjeb-upstream checkout a295713498582847ef7f8f50f913d03f099e9494
+#
+# Then run this script. The extracted files are already in src/, so neither the checkout nor an
+# installed MechJeb is needed to build or run PhysStageRecovery.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $up = Join-Path $root 'build/mechjeb-upstream'

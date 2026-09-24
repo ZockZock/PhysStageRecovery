@@ -46,7 +46,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 * PSR retains its descent confirmation and 45-degree ignition/alignment guard for detached stages, plus watchdog, active-vessel and crew exclusions. Parachute deployment uses stock safety with PSR descent confirmation; there is no target-site optimization.
 * Gear uses KSP's public CurrentState API and per-module deployment, including newly staged gear. Brakes and RCS use normal action groups. Physical touchdown confirmation belongs to PSR, not MechJeb. Recovery above the ground was removed in 0.8.0.
 
-`tools/ImportLanding.ps1` reproduces the extracted files from the pinned repository in `build/mechjeb-upstream`. The imported files are already supplied, so neither the repository nor an installed MechJeb mod is required to build or run PhysStageRecovery.
+`tools/ImportLanding.ps1` reproduces the extracted files from the pinned repository. The checkout itself is not kept in the project (it is 28 MB); the script's header names the two commands that fetch it at the pinned revision. The imported files are already supplied, so neither the repository nor an installed MechJeb mod is required to build or run PhysStageRecovery.
 
 ## Adaptations, 2026-09-23
 
