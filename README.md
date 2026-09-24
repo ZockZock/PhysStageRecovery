@@ -1,4 +1,4 @@
-# PhysStageRecovery 0.9.23 — KSP 1.12.5
+# PhysStageRecovery 0.9.24 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
@@ -35,6 +35,48 @@ Beim Start steht die Kontrolle in `KSP.log`:
 Steht dort weniger, fehlt an einem Teil der Regler — das Log meldet es dann als Fehler, und ein dort
 gesetzter Vorhalt überlebt Werkstatt und Rampe nicht. Triebwerke ohne Abschaltung (Feststoffbooster)
 bekommen den Regler weiterhin nicht zu sehen.
+
+## 0.9.24: Der Vorhalt liegt auf der Stock-Tankanzeige
+
+Der Vorhalt ist jetzt **direkt auf der Tankanzeige des Spiels** zu sehen — dort, wo im Stufenfeld der
+Balken mit `FT` steht. Der reservierte Anteil bekommt dort die Schraffur, der Rest bleibt der
+Stock-Balken; das eigene Feld aus 0.9.23 erscheint nur noch, wenn die Stock-Anzeige nicht nutzbar ist
+oder ein verfolgter Booster den Vorhalt hält.
+
+**Position und Größe sind abfragbar — ohne Ratespiel.** Die Stock-Anzeige ist öffentliche API:
+
+```csharp
+StageManager.Instance.Stages            // ein StageGroup je Stufe
+group.inverseStageIndex                 // die Stufennummer, verglichen mit Vessel.currentStage
+group.DeltaVHeadingImage                // der Balken selbst (UnityEngine.UI.Image)
+```
+
+`DeltaVHeadingImage` ist das einzige `Image`-Feld einer `StageGroup`, und `FT` ist die deutsche
+Stock-Abkürzung für `LiquidFuel` (`#autoLOC_6002095 = FT` in `dictionary.cfg`) — der Balken gehört also
+dem Spiel, nicht einem Mod. Das Feld selbst ist `private` und wird deshalb einmalig per Namen gelesen;
+fehlt es, sagt das Log es und das eigene Feld bleibt die Anzeige.
+
+Statt das Rechteck in Bildschirmkoordinaten umzurechnen, hängt das Overlay als Kind **an diesem
+Balken**:
+
+```csharp
+rect.SetParent(bar.rectTransform, false);   // linke Kante auf der linken Kante des Balkens
+rect.anchorMin = new Vector2(0f, 0f);
+rect.anchorMax = new Vector2(0f, 1f);
+rect.sizeDelta = new Vector2(bar.rect.width * reserveShare, 0f);
+```
+
+Damit folgen Platz, Größe, Ankermaße, UI-Skalierung und Auflösung dem Stock-Balken von selbst, und die
+Streifen liegen darüber, weil ein Kind nach seinem Elternteil gezeichnet wird. Der Werkzeugtip des
+Feldes nennt weiter die Zahlen; nach der Stufentrennung (Vorhalt freigegeben) verschwindet die
+Schraffur, weil der Treibstoff dann der Landung gehört.
+
+Beim ersten Einblenden steht im Log, was gefunden wurde — oder warum nicht:
+
+```
+[PhysStageRecovery] Lande-Vorhalt auf der Stock-Tankanzeige: Stufe 2 rect=92x14 fill=0.63
+[PhysStageRecovery] Lande-Vorhalt: Stock-Tankanzeige nicht nutzbar - kein Stufenfeld fuer Stufe 2 (Felder: 5,4,3,2,1)
+```
 
 ## 0.9.23: Der Vorhalt als eigenes Feld im Flug
 

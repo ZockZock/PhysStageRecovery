@@ -75,7 +75,7 @@ namespace BoosterWatch
             GameEvents.onCrash.Add(OnCrash);
             GameEvents.onCrashSplashdown.Add(OnCrash);
             AddToolbar();
-            Debug.Log("[PhysStageRecovery] 0.9.23 started; physics range " + settings.PhysicsRange + " m.");
+            Debug.Log("[PhysStageRecovery] 0.9.24 started; physics range " + settings.PhysicsRange + " m.");
         }
 
         private void AddToolbar()
@@ -234,6 +234,7 @@ namespace BoosterWatch
                     // The reserve of the rocket being flown: the window shows it while there is no
                     // separated booster yet.
                     activeReserve.Update(FlightGlobals.ActiveVessel);
+                    UpdateReserveOverlay();
                 }
                 double now = Planetarium.GetUniversalTime();
                 if (now < nextMeasure) return;
@@ -700,6 +701,7 @@ namespace BoosterWatch
             GameEvents.onGUIApplicationLauncherDestroyed.Remove(RemoveToolbar);
             GameEvents.onCrash.Remove(OnCrash); GameEvents.onCrashSplashdown.Remove(OnCrash);
             RemoveToolbar();
+            DetachReserveOverlay();
             foreach (TrackedBooster b in boosters) b.Restore();
             cameraFeed.Dispose();
             InputLockManager.RemoveControlLock(HoverLock);

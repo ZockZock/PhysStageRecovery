@@ -34,6 +34,10 @@ namespace BoosterWatch
         {
             ReserveStatus reserve = ReserveForHud();
             if (reserve == null || !reserve.Configured) return false;
+            // While the stock fuel gauge carries the hatch, the own field stays out of the way. It
+            // remains for the booster being followed and as the fallback when the stock bar cannot be
+            // used.
+            if (ReserveOverlayActive && ReferenceEquals(reserve, activeReserve)) return false;
             if (!reserveHudReady)
             {
                 reserveHudReady = true;
