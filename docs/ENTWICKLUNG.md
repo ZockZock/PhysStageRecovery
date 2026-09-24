@@ -114,6 +114,20 @@ Get-Content SHA256SUMS.txt | ForEach-Object {
 
 ## Einstellungen des Repositorys
 
-`user.name` und `user.email` sind nur lokal gesetzt (`ermel`, `ermel@localhost`) — das
-Repository hat keine Verbindung zu einem Server. `core.autocrlf` steht auf `false`, damit git
-die Zeilenenden der vorhandenen Dateien nicht anfasst.
+`user.name` und `user.email` sind nur lokal gesetzt (`ermel`, `ermel@localhost`). `core.autocrlf`
+steht auf `false`, damit git die Zeilenenden der vorhandenen Dateien nicht anfasst.
+
+Seit dem 24.09.2026 gibt es ein Remote: `origin` =
+`https://github.com/ZockZock/PhysStageRecovery.git`. **Achtung: Tags werden nicht automatisch
+mitgepusht.** Ein `git push` überträgt nur den Branch; die Baseline-Tags bleiben dann lokal und
+kein einziger eingefrorener Stand liegt auf dem Server. Nach einer neuen Baseline also:
+
+```powershell
+git push origin main
+git push origin v0.9.38            # nur dieser Tag
+git push origin --follow-tags      # oder: Branch samt der Tags, die zu ihm gehören
+git ls-remote --tags origin        # Kontrolle: was liegt wirklich auf dem Server?
+```
+
+Die Baseline-Schnappschüsse unter `build/backups/` liegen **nicht** auf dem Server (sie sind wie
+`build/` ignoriert). Wer sie sichern will, muss den Ordner selbst kopieren.
