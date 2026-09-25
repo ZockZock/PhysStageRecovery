@@ -1,8 +1,38 @@
-# PhysStageRecovery 0.9.37 — KSP 1.12.5
+# PhysStageRecovery 0.9.38 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
 **MechJeb muss weder installiert noch als Bauteil am Booster vorhanden sein.** Die benötigten Algorithmen sind im eigenen Plugin enthalten. Erforderlich ist weiterhin Harmony 2 unter `GameData/000_Harmony/0Harmony.dll`.
+
+## 0.9.38: Eigener Boden unter fernen Boostern
+
+KSP baut Gelände und dessen Bodenkollision **nur um das aktive Schiff** (gemessen: der
+`PQS_Collider` folgt `PQS.target`, und das ist das aktive Schiff). Ein Booster, der hunderte
+Kilometer entfernt landet, hat dort deshalb keinen Boden: er fällt durch die sichtbare Landschaft,
+und der Aufsetzkontakt musste bisher aus der prozeduralen Höhe **geschätzt** werden
+(`TouchdownPolicy.HeightContact`, im Log als `KONTAKT=hoehe` und im Fenster als „Aufgesetzt
+(Bodenhoehe, kein Collider)" sichtbar).
+
+Jetzt baut der Mod dem Booster seinen eigenen Boden:
+
+* ein Höhenfeld aus der **exakten** prozeduralen Oberfläche (`PQS.GetSurfaceHeight`), 33 × 33
+  Punkte über 700 m, als Netz mit `MeshCollider` auf derselben Ebene wie KSPs Gelände
+  (`Local Scenery`) — damit behandelt die Teilekollision des Spiels ihn wie echten Grund;
+* der Wurzelknoten hängt unter `PQS`, deshalb gehen Planetenrotation und jede
+  Floating-Origin-Verschiebung automatisch mit (ein fest im Raum stehendes Netz würde binnen
+  Sekunden aus der Landschaft wandern);
+* gebaut wird nur, wo er nötig ist: weiter als **2,5 km** vom aktiven Schiff entfernt, tiefer als
+  **2,5 km** über Grund und **nicht über Wasser** (dort ist die Wasseroberfläche die Referenz, und ein
+  Netz auf dem Meeresboden wäre hunderte Meter zu tief); danach wird er dem driftenden Booster
+  nachgeführt (ab 150 m Versatz oder nach 3 s) und beim Abschluss der Verfolgung wieder abgeräumt.
+
+Die Entscheidung steht in `src/GroundPatchPolicy.cs`, die Netzgeometrie in `src/GroundField.cs` —
+beide ohne KSP und damit prüfbar; die KSP-Anbindung in `src/GroundPatch.cs`.
+
+**Noch nicht im Flug bestätigt:** In der Messsonde stand ein Körper auf der Teile-Ebene nachweislich
+auf einem solchen Netz (Kollision, Höhe exakt), mit einem echten Booster ist der Patch noch nicht
+geflogen. Solange er fehlt oder nicht greift, bleibt die bisherige Schätzung als Rückfallebene
+aktiv.
 
 ## 0.9.37: Nur ein noch geschlossener Fallschirm zählt
 

@@ -35,6 +35,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Tracking acceptance test compilation failed.' 
 & $acceptExe
 if ($LASTEXITCODE -ne 0) { throw 'Tracking acceptance tests failed.' }
 $harmony = Join-Path $KspDir 'GameData\000_Harmony\0Harmony.dll'
+# Der eigene Boden unter fernen Boostern: wann er gebaut wird und welche Form sein Netz hat.
+# Reine Arithmetik, kein KSP.
+$patchExe = Join-Path $testDir 'GroundPatchPolicyTests.exe'
+& $compiler /nologo /target:exe ('/out:' + $patchExe) (Join-Path $PSScriptRoot 'src\RecoveryPolicy.cs') (Join-Path $PSScriptRoot 'src\GroundPatchPolicy.cs') (Join-Path $PSScriptRoot 'src\GroundField.cs') (Join-Path $PSScriptRoot 'tests\GroundPatchPolicyTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Ground patch test compilation failed.' }
+& $patchExe
+if ($LASTEXITCODE -ne 0) { throw 'Ground patch tests failed.' }
 $guardExe = Join-Path $testDir 'ParachuteGuardTests.exe'
 Copy-Item -LiteralPath $harmony -Destination (Join-Path $testDir '0Harmony.dll') -Force
 & $compiler /nologo /target:exe ('/reference:' + $harmony) ('/out:' + $guardExe) (Join-Path $PSScriptRoot 'src\ParachuteGuard.cs') (Join-Path $PSScriptRoot 'src\ParachuteDeployment.cs') (Join-Path $PSScriptRoot 'tests\ParachuteGuardTests.cs')

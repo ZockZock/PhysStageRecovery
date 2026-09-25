@@ -44,6 +44,8 @@ namespace BoosterWatch
         public TouchdownOutcome TouchdownOutcome;
         public readonly HashSet<uint> KnownParts = new HashSet<uint>();
         public readonly PoweredLanding Landing;
+        // Eigener Boden unter dem Booster, solange KSP weit weg keinen baut (GroundPatchPolicy).
+        private readonly GroundPatch groundPatch = new GroundPatch();
         public readonly BoosterReadout Readout = new BoosterReadout();
         public string StageStatus = "";
         public Part Anchor;
@@ -87,6 +89,7 @@ namespace BoosterWatch
         public void Restore()
         {
             Landing.Shutdown();
+            groundPatch.Dispose();
             // Put the stock temperature limits back before the booster leaves the tracked set.
             heat.Restore(Vessel);
             if (Vessel != null && ReferenceEquals(Vessel.vesselRanges, ExtendedRanges))
@@ -121,7 +124,7 @@ namespace BoosterWatch
                 PhysicsActive = physics, Clearance = double.NaN,
                 Eligible = !ImpactFailed && recoveryEnabled && v != FlightGlobals.ActiveVessel && v.GetCrewCount() == 0
                     && v.mainBody.isHomeWorld && !v.LandedOrSplashed && Distance <= settings.PhysicsRange };
-            if (!physics) { Landing.Stop("physik inaktiv"); Descent.Reset(); Decision = Policy.Evaluate(Sample, settings.Limits); Status = Decision.Reason; return; }
+            if (!physics) { Landing.Stop("physik inaktiv"); Descent.Reset(); groundPatch.Dispose(); Decision = Policy.Evaluate(Sample, settings.Limits); Status = Decision.Reason; return; }
 
             Readout.Update(v, Sample.Time);
 
@@ -205,6 +208,15 @@ namespace BoosterWatch
                 Sample.Clearance = GroundSurface.Clearance(Sample.Clearance, GroundDepth, worldGround, worldDistance);
                 Sample.TerrainKnown = RecoveryPolicy.Finite(ground) && RecoveryPolicy.Finite(GroundDepth);
                 SyntheticContact = TouchdownPolicy.HeightContact(physics, Sample.TerrainKnown, worldGround, Sample.Clearance);
+                // KSP baut Gelaende und dessen Kollision nur um das aktive Schiff. Ist der Booster
+                // weit weg und tief genug, baut der Mod ihm seinen eigenen Boden - dann gibt es
+                // wieder einen echten Aufsetzkontakt statt einer geschaetzten Hoehe.
+                // Ueber Wasser ist die Wasseroberflaeche die Referenz, nicht der Meeresboden.
+                bool overWater = body.ocean && ground < 0;
+                if (v.mainBody.isHomeWorld && GroundPatchPolicy.Needed(Distance, Sample.Clearance, overWater))
+                    groundPatch.Refresh(v, Sample.Time, Sample.Clearance);
+                else
+                    groundPatch.Dispose();
                 // The ground ahead of the booster, along the direction it is actually travelling.
                 // Ground colliders only exist around the active vessel, so this uses the procedural
                 // surface - the same source the straight-down fallback uses - and the smaller of the
@@ -268,6 +280,7 @@ namespace BoosterWatch
                     + " brakeGuard=" + Landing.BrakingEnvelopeTriggered + " thrustAcc=" + Number(Landing.AvailableAcceleration, "m/s2")
                     + " istAcc=" + Number(Landing.ActualAcceleration, "m/s2")
                     + (SyntheticContact ? " KONTAKT=hoehe" : "")
+                    + (groundPatch.Exists ? " BODEN=eigen" : "")
                     + " guidance=" + (Landing.Status.Length > 0 ? Landing.Status : "-")
                     + (Landing.StopReason.Length > 0 ? " | gestoppt: " + Landing.StopReason : "")
                     + " distance=" + Distance + " terrain=" + SurfaceAltitude + " result=" + Status);
