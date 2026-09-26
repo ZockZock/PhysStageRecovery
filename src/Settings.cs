@@ -5,21 +5,14 @@ using UnityEngine;
 
 namespace BoosterWatch
 {
-    // Which landing law flies a booster. `legacy` is the ported MechJeb state chain, `predictive`
-    // the forecast-driven law. The switch exists so a flight that goes wrong can be repeated on
-    // the other path without a rebuild.
-    public enum GuidanceMode { Legacy = 0, Predictive = 1 }
-
     public sealed class Settings
     {
         public readonly RecoveryLimits Limits = new RecoveryLimits();
         public float PhysicsRange = 500000;
         public int MaxBoosters = 8;
-        public int CameraFps = 15;
+        public int CameraFps = 25;
         public bool AutoArm = true;
         public bool AutoStage, PoweredLanding;
-        // The predictive law is what gets flown; the ported chain stays one setting away.
-        public GuidanceMode GuidanceMode = GuidanceMode.Predictive;
         public bool ModEnabled = true, AutoRecovery = true, CameraEnabled = true, AutoOpenWindow = true;
         public bool ShowDiagnostics;
         public bool HasBehaviorSettings { get; private set; }
@@ -52,6 +45,9 @@ namespace BoosterWatch
         private string filePath;
         public static string Path { get { return System.IO.Path.Combine(KSPUtil.ApplicationRootPath, "GameData/PhysStageRecovery/PluginData/settings.cfg"); } }
 
+        // Version of the file layout. 8: guidanceMode and reserveHudX/Y removed.
+        public const int CurrentVersion = 8;
+
         public static Settings Load() { return Load(Path); }
 
         public static Settings Load(string path)
@@ -64,7 +60,7 @@ namespace BoosterWatch
                 ConfigNode n = root.GetNode("PhysStageRecovery") ?? root.GetNode("BoosterWatch") ?? root;
                 s.PhysicsRange = (float)Read(n, "physicsRangeKm", 500, 5, 2000) * 1000;
                 s.MaxBoosters = (int)Read(n, "maxBoosters", 8, 1, 16);
-                s.CameraFps = (int)Read(n, "cameraFps", 15, 5, 30);
+                s.CameraFps = (int)Read(n, "cameraFps", 25, 5, 60);
                 s.WindowWidth = (float)Read(n, "windowWidth", 720, 480, 7680);
                 s.WindowHeight = (float)Read(n, "windowHeight", 720, 540, 4320);
                 s.WindowX = (float)Read(n, "windowX", 35, 0, 7680);
@@ -96,11 +92,8 @@ namespace BoosterWatch
                 s.CaptureAltitude = Read(n, "captureAltitude", 100, 10, 5000);
                 s.TiltLimit = Read(n, "tiltLimit", 20, 1, 80);
                 s.ThrustReserve = Read(n, "thrustReserve", 0.2, 0, 0.6);
-                string mode = n.GetValue("guidanceMode");
-                if (!string.IsNullOrEmpty(mode))
-                    s.GuidanceMode = mode.Trim().ToLowerInvariant() == "legacy" ? GuidanceMode.Legacy : GuidanceMode.Predictive;
                 s.ChuteHeight = Read(n, "chuteHeight", 1000, 100, 20000);
-                double version = Read(n, "configVersion", 1, 1, 7);
+                double version = Read(n, "configVersion", 1, 1, CurrentVersion);
                 if (version < 2)
                 {
                     // Upgrade only the old defaults. Preserve explicitly customized limits.
@@ -108,15 +101,9 @@ namespace BoosterWatch
                     if (s.Limits.SinkSpeed == 5 && s.Limits.TotalSpeed == 6)
                     { s.Limits.SinkSpeed = 8; s.Limits.TotalSpeed = 9; }
                 }
-                if (version < 5)
-                {
-                    // The predictive landing law brought its own settings. The old landingSpeed is
-                    // what the ported chain aimed for; the new law uses its own key, so carry the
-                    // existing value across instead of silently replacing it with the default.
-                    if (n.HasValue("landingSpeed")) s.TouchdownSpeed = s.LandingSpeed;
-                    s.Save();
-                }
-                else if (version < 7 || !n.HasValue("captureAltitude")) s.Save();
+                // Older files are written out once in the current form: new keys appear for the player
+                // to edit, retired ones (guidanceMode, reserveHudX/Y, touchdownSpeed ...) disappear.
+                if (version < CurrentVersion || !n.HasValue("captureAltitude")) s.Save();
             }
             catch (Exception e) { Debug.LogError("[PhysStageRecovery] Settings: " + e); }
             return s;
@@ -137,7 +124,10 @@ namespace BoosterWatch
                 n.RemoveValues("requireTouchdown"); n.RemoveValues("recoveryHeight"); n.RemoveValues("touchdownSeconds");
                 // The retired second key for the landing target: the window's value is the target now.
                 n.RemoveValues("touchdownSpeed");
-                Set(n, "configVersion", 7); Set(n, "physicsRangeKm", PhysicsRange / 1000);
+                // Retired in 0.9.40: the ported MechJeb landing chain (guidanceMode = legacy) and the
+                // old free-floating reserve display.
+                n.RemoveValues("guidanceMode"); n.RemoveValues("reserveHudX"); n.RemoveValues("reserveHudY");
+                Set(n, "configVersion", CurrentVersion); Set(n, "physicsRangeKm", PhysicsRange / 1000);
                 Set(n, "maxBoosters", MaxBoosters); Set(n, "cameraFps", CameraFps);
                 n.SetValue("autoArm", AutoArm.ToString(), true);
                 n.SetValue("autoStage", AutoStage.ToString(), true);
@@ -159,7 +149,6 @@ namespace BoosterWatch
                 Set(n, "captureAltitude", CaptureAltitude);
                 Set(n, "tiltLimit", TiltLimit);
                 Set(n, "thrustReserve", ThrustReserve);
-                n.SetValue("guidanceMode", GuidanceMode == GuidanceMode.Legacy ? "legacy" : "predictive", true);
                 Set(n, "chuteHeight", ChuteHeight);
                 Set(n, "maxSinkSpeed", Limits.SinkSpeed);
                 Set(n, "maxHorizontalSpeed", Limits.HorizontalSpeed); Set(n, "maxTotalSpeed", Limits.TotalSpeed);

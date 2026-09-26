@@ -68,6 +68,48 @@ internal sealed class GuidanceRunner
     public double DryMass = 3000;
     public bool Dry { get { return Mass <= DryMass + 1e-6; } }
     public double Isp = 310;
+    // Rumpfauftrieb der "echten" Stufe im Verhaeltnis zum Widerstand, oben positiv, und ob die
+    // Messung an die Regelung geht (im Spiel: DescentAdapter.MeasureLift).
+    public double PlantLiftRatio;
+    public bool ReportLift = true;
+    // Brenndauer an die Vorhersage melden (im Spiel immer; alte Tests rechnen ohne).
+    public bool ReportFuel;
+    // Drehrate der Lage [Grad/s], NaN = die Stufe steht sofort, wie befohlen.
+    public double TurnRateDegrees = double.NaN, MaxAttitudeError;
+    private double tiltAngle;
+    // Unter Schub richtet sich die echte Stufe auf: kleinere Luftbremse, weniger Abtrieb (NaN = wie
+    // vorher). AxialArea ist der Rueckwaerts-Wert, den der Adapter kennt (NaN = der aktuelle).
+    public double PlantBurnDragArea = double.NaN, PlantBurnLiftRatio = double.NaN, AxialArea = double.NaN;
+    private bool Lit { get { return IgnitionClearance >= 0; } }
+    // Gleitflug der "echten" Stufe: Cd*A und Auftrieb, solange die Regelung gleiten laesst (NaN = kann
+    // nicht gleiten, bleibt beim normalen Wert).
+    public double PlantGlideDragArea = double.NaN, PlantGlideLiftRatio;
+    private bool Gliding { get { return !Lit && Last.Valid && Last.Gliding && !double.IsNaN(PlantGlideDragArea); } }
+    public double GlideSeconds;
+    public double PlantDragArea
+    {
+        get
+        {
+            if (Gliding) return PlantGlideDragArea;
+            return Lit && !double.IsNaN(PlantBurnDragArea) ? PlantBurnDragArea : World.DragArea;
+        }
+    }
+    public double PlantLift
+    {
+        get
+        {
+            if (Gliding) return PlantGlideLiftRatio;
+            return Lit && !double.IsNaN(PlantBurnLiftRatio) ? PlantBurnLiftRatio : PlantLiftRatio;
+        }
+    }
+    private double BurnDragReport()
+    {
+        double now = PlantDragArea;
+        if (Lit) return now;
+        double axial = double.IsNaN(AxialArea) ? now : AxialArea;
+        if (Gliding) return Math.Min(now, axial);
+        return Math.Min(now, Math.Max(axial, 0.6 * now));
+    }
     public double Sink = 150, Lateral = 0;
     public double Clearance = 2000;
     public double Time;
@@ -148,13 +190,18 @@ internal sealed class GuidanceRunner
             Gravity = World.Gravity(Clearance),
             ThrustAcceleration = ThrustAcceleration(Clearance),
             AirDensity = World.Density(Clearance),
-            DragCoefficient = World.DragArea,
+            DragCoefficient = PlantDragArea,
+            BurnDragCoefficient = BurnDragReport(),
             // What the air is already doing, so the law can credit it instead of adding thrust on
             // top of it. The adapter measures the same number from the real drag cubes.
             DragValid = true,
             DragAcceleration = DragAt(Clearance, Math.Sqrt(Sink * Sink + Lateral * Lateral)),
+            LiftRatio = ReportLift ? PlantLift : 0,
+            LiftKnown = ReportLift && PlantLift != 0,
             AvailableDeltaV = 0,
-            AvailableBurnTime = 0,
+            // Wie der Adapter: die Brenndauer bis die Tanks leer sind. Mit 0 rechnete die Vorhersage
+            // mit 90 % der Masse als Treibstoff und hielt leere Stufen fuer landefaehig.
+            AvailableBurnTime = ReportFuel ? Math.Max(0, Mass - DryMass) / (Thrust / (Isp * 9.80665)) : 0,
             Valid = true
         };
         return state;
@@ -166,7 +213,7 @@ internal sealed class GuidanceRunner
     {
         double density = World.Density(clearance);
         if (density <= 0 || speed <= 0) return 0;
-        return 0.5 * density * speed * speed * World.DragArea / Mass;
+        return 0.5 * density * speed * speed * PlantDragArea / Mass;
     }
 
     // One physics step of the real vehicle, driven by the guidance command. The guidance returns
@@ -187,20 +234,41 @@ internal sealed class GuidanceRunner
         // A dry booster has no thrust to apply, whatever the law asks for.
         double authority = Dry ? 0 : 1;
         double speed = Math.Sqrt(Sink * Sink + Lateral * Lateral);
-        double drag = 0.5 * World.Density(Clearance) * speed * speed * World.DragArea / Mass;
+        double drag = 0.5 * World.Density(Clearance) * speed * speed * PlantDragArea / Mass;
         // The command is the acceleration itself, so the vehicle applies it as it stands. Nothing
         // here needs the engine's maximum: the law already saturated its command at the braking
         // budget, which is that maximum minus the reserve.
         // Drag opposes the motion, so it comes off the sink rate. It used to be added to it, which
         // made the model's air brake the wrong way: harmless at 2 m/s of descent, and a runaway at
         // the speeds a returning booster actually has.
-        double aSink = -authority * Last.AccelerationUp - drag * (speed > 1e-6 ? Sink / speed : 1)
+        // Lage der echten Stufe: folgt dem Befehl nur mit begrenzter Drehrate (NaN = sofort). Im Spiel
+        // brauchte eine 25-t-Stufe bei wenig Schub fuer 20 Grad gut eine Sekunde.
+        double cmdUp = Last.AccelerationUp, cmdEast = Last.AccelerationEast;
+        double cmdMag = Math.Sqrt(cmdUp * cmdUp + cmdEast * cmdEast);
+        if (!double.IsNaN(TurnRateDegrees) && cmdMag > 1e-6)
+        {
+            double wanted = Math.Atan2(cmdEast, cmdUp);
+            double step = TurnRateDegrees * Math.PI / 180 * dt;
+            double diff = wanted - tiltAngle;
+            tiltAngle += Math.Max(-step, Math.Min(step, diff));
+            MaxAttitudeError = Math.Max(MaxAttitudeError, Math.Abs(wanted - tiltAngle) * 180 / Math.PI);
+            cmdUp = cmdMag * Math.Cos(tiltAngle); cmdEast = cmdMag * Math.Sin(tiltAngle);
+        }
+        double aSink = -authority * cmdUp - drag * (speed > 1e-6 ? Sink / speed : 1)
             + World.Gravity(Clearance);
         // The guidance returns the commanded acceleration in the local horizon frame, so the harness
         // applies it as the acceleration it is: `AccelerationEast` is the acceleration along +east.
         // The minus that used to stand here cancelled a minus that was missing in the law itself, so
         // the two errors hid each other and the model flew a booster the game could not.
-        double aLateral = authority * Last.AccelerationEast - drag * (speed > 1e-6 ? Lateral / speed : 0);
+        double aLateral = authority * cmdEast - drag * (speed > 1e-6 ? Lateral / speed : 0);
+        // Auftrieb quer zur Bahn, nach oben positiv.
+        double lift = PlantLift * drag;
+        if (speed > 1e-6)
+        {
+            aSink -= lift * Math.Abs(Lateral) / speed;
+            aLateral += lift * Math.Sign(Lateral) * Sink / speed;
+        }
+        if (Gliding) GlideSeconds += dt;
         Sink += aSink * dt;
         Lateral += aLateral * dt;
         Mass = Math.Max(DryMass, Mass - Last.Throttle * Thrust / (Isp * 9.80665) * dt);
@@ -995,6 +1063,122 @@ internal static class GuidanceTests
             + (runner.IgnitionClearance < 0 ? "keiner" : runner.IgnitionClearance.ToString("0") + " m"));
     }
 
+    // Flug vom 25.09.2026, 21:21: 27,8 t, Mainsail, ohne Steuerflaechen. Die Stufe hing 10 Grad
+    // schief im Luftstrom, und der Rumpf drueckte sie mit 0,45 x Widerstand nach unten. Ab 17,7 km
+    // (1067 m/s abwaerts, 2019 m/s seitlich) zuendete sie bei 8,5 km und schlug mit 231 m/s auf.
+    private static GuidanceRunner DownforceRunner(bool report)
+    {
+        GuidanceRunner runner = MakeRunner(17746, 1067, 2019, 1500000);
+        runner.Mass = 27800; runner.DryMass = 15000;
+        // Gemessen: Cd*A 7 im Fallen, 4,5 unter Schub (die Schwenkduese richtet sie auf), Abtrieb
+        // -0,45 bzw. -0,3 x Widerstand. Rueckwaerts-Wert aus dem oberen Teil: 1.
+        runner.World.DragArea = 7.0; runner.PlantBurnDragArea = 4.5;
+        runner.PlantLiftRatio = -0.45; runner.PlantBurnLiftRatio = -0.3;
+        runner.ReportLift = report;
+        // Ohne Messung (bis 0.9.40) kannte der Adapter auch den Zuendungs-Wert nicht.
+        runner.AxialArea = report ? 1.0 : 7.0;
+        runner.Fly(0.05, 300);
+        return runner;
+    }
+
+    private static void TestDownforceIsPlannedFor()
+    {
+        Console.WriteLine("-- Abtrieb des schiefen Rumpfes (Flug 25.09.2026 21:21, 17,7 km, 2250 m/s)");
+        GuidanceRunner blind = DownforceRunner(false);
+        Console.WriteLine("     ohne Messung: " + blind.Trace());
+        GuidanceRunner runner = DownforceRunner(true);
+        Console.WriteLine("     mit Messung:  " + runner.Trace());
+        True(runner.Landed, "aufgesetzt");
+        Check(runner.TouchdownSpeed > 0 && runner.TouchdownSpeed <= 8,
+            "sanft aufgesetzt mit " + runner.TouchdownSpeed.ToString("0.00") + " m/s (geflogen wurden 231)");
+        Check(runner.IgnitionClearance > blind.IgnitionClearance,
+            "der gemessene Abtrieb zuendet frueher (" + runner.IgnitionClearance.ToString("0") + " m statt "
+            + blind.IgnitionClearance.ToString("0") + " m)");
+        Check(!runner.Dry, "Treibstoff reicht: " + runner.Mass.ToString("0") + " kg");
+    }
+
+    // Flug vom 25.09.2026, 21:58: 31 t, Mainsail, vier Steuerflaechen. Rueckwaerts gerichtet nur Cd*A
+    // 0,7-0,8 - die Luft bremst kaum. Ab 32 km (1109 m/s abwaerts, 2080 m/s seitlich) sagte der
+    // Rueckwaerts-Plan "aussichtslos", die Stufe zuendete bei 24 km, leerte die Tanks und schlug mit
+    // 194 m/s auf. Gleitend (Cd*A ~12) nimmt die Luft den groessten Teil der Fahrt.
+    private static GuidanceRunner FinnedRunner(bool glide)
+    {
+        GuidanceRunner runner = MakeRunner(32057, 1109, 2080, 1500000);
+        runner.Mass = 31140; runner.DryMass = 15100;
+        runner.World.DragArea = 0.8; runner.AxialArea = 0.8;
+        runner.PlantGlideDragArea = 12; runner.PlantGlideLiftRatio = 0.2; runner.ReportFuel = true;
+        if (!glide) runner.Config.Glide.AngleDegrees = 0;
+        runner.Fly(0.05, 400);
+        return runner;
+    }
+
+    private static void TestFinnedStageGlidesInsteadOfBurning()
+    {
+        Console.WriteLine("-- Stufe mit Steuerflaechen, 2360 m/s aus 32 km (Flug 25.09.2026 21:58)");
+        GuidanceRunner old = FinnedRunner(false);
+        Console.WriteLine("     ohne Gleiten: " + old.Trace());
+        GuidanceRunner runner = FinnedRunner(true);
+        double used = (31140 - runner.Mass) / 1000;
+        Console.WriteLine("     mit Gleiten:  " + runner.Trace() + " geglitten=" + runner.GlideSeconds.ToString("0") + " s"
+            + " verbraucht=" + used.ToString("0.00") + " t");
+        True(runner.Landed, "aufgesetzt");
+        Check(runner.TouchdownSpeed > 0 && runner.TouchdownSpeed <= 8,
+            "sanft aufgesetzt mit " + runner.TouchdownSpeed.ToString("0.00") + " m/s (geflogen wurden 194)");
+        Check(runner.GlideSeconds > 20, "die Stufe gleitet, statt oben zu zuenden (" + runner.GlideSeconds.ToString("0") + " s)");
+        Check(runner.IgnitionClearance > 0 && runner.IgnitionClearance < 15000,
+            "Zuendung erst unten bei " + runner.IgnitionClearance.ToString("0") + " m");
+        Check(used < 8, "Treibstoff fuer die Landung: " + used.ToString("0.00") + " t von 16");
+    }
+
+    // Flug vom 25.09.2026, 22:57: Zielhoehe 10 m (Einstellung), bei 100 m noch 20 m/s seitlich.
+    // Die Seitenfahrt muss weg sein, bevor die Stufe fuer die letzten Meter aufrecht steht.
+    private static void TestDriftGoneBeforeUprightWithLowCapture()
+    {
+        Console.WriteLine("-- Zielhoehe 10 m: Seitenfahrt vor dem Aufrichten weg");
+        GuidanceRunner runner = MakeRunner(3000, 200, 150, 1500000);
+        runner.Mass = 26000; runner.DryMass = 15000; runner.World.DragArea = 1.0; runner.ReportFuel = true;
+        runner.Config.Predictor.CaptureAltitude = 10; runner.Config.Terminal.Altitude = 150;
+        runner.TurnRateDegrees = 15;
+        double lateralAt45 = double.NaN, lateralAt25 = double.NaN;
+        for (int i = 0; i < 6000 && !runner.Landed; i++)
+        {
+            runner.Step(0.05);
+            if (double.IsNaN(lateralAt45) && runner.Clearance < 45) lateralAt45 = Math.Abs(runner.Lateral);
+            if (double.IsNaN(lateralAt25) && runner.Clearance < 25) lateralAt25 = Math.Abs(runner.Lateral);
+        }
+        Console.WriteLine("     " + runner.Trace() + " seitlich bei 45 m=" + lateralAt45.ToString("0.00"));
+        True(runner.Landed, "aufgesetzt");
+        // Vorher 7,9 m/s bei 45 m - die Stufe lehnte sich bis in die letzten Meter.
+ Check(lateralAt45 < 3, "Seitenfahrt bei 45 m " + lateralAt45.ToString("0.00") + " m/s");
+        Check(lateralAt25 < 1.2, "Seitenfahrt bei 25 m " + lateralAt25.ToString("0.00") + " m/s");
+        Console.WriteLine("     groesster Lagefehler " + runner.MaxAttitudeError.ToString("0.0") + " Grad");
+        Check(runner.TouchdownSpeed <= 8 && runner.TouchdownLateral < 1.5,
+            "Aufsetzen " + runner.TouchdownSpeed.ToString("0.0") + " m/s, seitlich " + runner.TouchdownLateral.ToString("0.00"));
+    }
+
+    // Flug vom 25.09.2026, 23:16: Zuendung bei 818 m mit 150 m/s abwaerts und 128 m/s seitlich,
+    // Zielhoehe 20 m. Mit der Drehtraegheit der echten Stufe schob sie sich am Ende mit 6-10 m/s
+    // in die Gegenrichtung.
+    private static void TestLateArrivalWithSlowAttitude()
+    {
+        Console.WriteLine("-- Zuendung 818 m, 128 m/s seitlich, Lage dreht 10 Grad/s");
+        GuidanceRunner runner = MakeRunner(818, 150, 128, 1500000);
+        runner.Mass = 21500; runner.DryMass = 15000; runner.World.DragArea = 1.0; runner.ReportFuel = true;
+        runner.Config.Predictor.CaptureAltitude = 20; runner.Config.Terminal.Altitude = 150;
+        runner.TurnRateDegrees = 10;
+        double maxReverse = 0;
+        for (int i = 0; i < 6000 && !runner.Landed; i++)
+        {
+            runner.Step(0.05);
+            if (runner.Clearance < 60) maxReverse = Math.Max(maxReverse, -runner.Lateral);
+        }
+        Console.WriteLine("     " + runner.Trace() + " Gegenfahrt=" + maxReverse.ToString("0.00")
+            + " Lagefehler=" + runner.MaxAttitudeError.ToString("0.0"));
+        True(runner.Landed, "aufgesetzt");
+        Check(Math.Abs(runner.TouchdownLateral) < 3, "seitlich beim Aufsetzen " + runner.TouchdownLateral.ToString("0.00") + " m/s (Flug: 6,2)");
+        Check(maxReverse < 2, "keine Gegenfahrt ueber 2 m/s unter 60 m (" + maxReverse.ToString("0.00") + ")");
+    }
+
     // ---------------------------------------------------------------- helpers
     private static GuidanceRunner MakeRunner(double clearance, double sink, double lateral, double thrust)
     {
@@ -1186,6 +1370,10 @@ internal static class GuidanceTests
         TestDeferredForecast();
         TestHeavySidewaysEntryBrakesLateAndHard();
         TestTheCrashedStateLandsWithTheAxisAwareBurn();
+        TestDownforceIsPlannedFor();
+        TestFinnedStageGlidesInsteadOfBurning();
+        TestDriftGoneBeforeUprightWithLowCapture();
+        TestLateArrivalWithSlowAttitude();
         Console.WriteLine(failures == 0 ? "Alle Guidance-Tests bestanden."
             : failures + " Guidance-Tests fehlgeschlagen.");
         return failures == 0 ? 0 : 1;

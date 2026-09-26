@@ -96,9 +96,7 @@ namespace BoosterWatch
             stockMarkers += (stockMarkers.Length > 0 ? "|" : "") + marker;
         }
 
-        // A module put on a part at runtime gets no OnStart, so everything that has to happen once is
-        // done from the update hooks instead - and from OnAwake, which KSP calls while the module is
-        // being added.
+        // Setup runs as early as possible (OnAwake), and again from the update hooks as a fallback.
         public override void OnAwake()
         {
             EnsureSetup();
@@ -133,7 +131,6 @@ namespace BoosterWatch
                 GameEvents.onVesselWasModified.Add(OnVesselModified);
             }
             RefreshGroup();
-            ReportSetup();
         }
 
         // One line per engine and flight, so a log shows which tanks the reserve was measured over.
@@ -174,16 +171,27 @@ namespace BoosterWatch
         public override void OnStart(StartState state)
         {
             EnsureSetup();
+            // Here and not in EnsureSetup: during OnAwake the part has no vessel yet and the saved
+            // percentage is not loaded, so the line never appeared.
+            RefreshGroup();
+            ReportSetup();
         }
 
         // Editor and flight: keep the menu text and the tank group current. The walk over the branch
         // happens twice a second, never per frame and never per physics tick.
+        private bool textShown;
+        private float shownPercent = float.NaN;
         private void Update()
         {
             if (faulted) return;
             try
             {
                 if (!setup) EnsureSetup();
+                // Most engines carry no reserve at all; they need no branch walk twice a second.
+                // Symmetry counterparts only get onSymmetryFieldChanged, not our onFieldChanged: a
+                // changed percentage is noticed here instead.
+                if (reservePercent != shownPercent) textDirty = true;
+                if (reservePercent <= 0 && !locked && !textDirty && textShown) return;
                 bool periodic = Time.unscaledTime >= nextRefresh;
                 if (!periodic && !textDirty) return;
                 if (periodic)
@@ -193,6 +201,8 @@ namespace BoosterWatch
                 }
                 textDirty = false;
                 UpdateTexts();
+                textShown = true;
+                shownPercent = reservePercent;
             }
             catch (Exception e) { Fault(e); }
         }
@@ -243,6 +253,9 @@ namespace BoosterWatch
                 else if (flew && onGround) Release("#PSR_Reserve_ReasonGround");
             }
 
+            // No reserve set: nothing to hold. The bookkeeping above still runs (start vessel, first
+            // tick, flown), so a reserve set later in the flight is released like any other.
+            if (reservePercent <= 0 && !locked) return;
             ReadAmounts();
             bool canHold = FuelReserve.Acts(homeWorld, shuttable, reservePercent, reserveReleased,
                 FuelReserve.HasTanks(stocks));

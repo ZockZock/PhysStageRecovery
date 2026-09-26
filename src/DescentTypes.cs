@@ -28,11 +28,29 @@ namespace BoosterWatch.Guidance
         // returns. a_drag = 0.5 * rho * v^2 * DragCoefficient / mass, because mass is not constant
         // and the forecast has to burn propellant as it integrates.
         public double DragCoefficient;
+        // Cd*A, mit dem die Vorhersage die Bremszuendung rechnet (0 = DragCoefficient). Kleiner als
+        // der aktuelle Wert, wenn die Stufe gerade schief oder gleitend fliegt: unter Schub richtet
+        // sie sich auf (DescentAdapter.Build).
+        public double BurnDragCoefficient;
         public double AvailableDeltaV, AvailableBurnTime;
         // Drag along the velocity direction, positive = braking. The adapter recomputes it from the
         // real drag cubes every tick, because aero data belongs to the game and not to the law.
         public bool DragValid;
+        // DragCoefficient is the value measured while flying straight backwards (not the current,
+        // possibly gliding attitude). Without it the glide must not start: the forecast would plan
+        // the whole descent with the 3-4x larger glide drag and ignite too late.
+        public bool AxialDragKnown;
         public double DragAcceleration;
+        // Auftrieb des Rumpfes im Verhaeltnis zum Widerstand, quer zur Bahn in der senkrechten
+        // Ebene, positiv = nach oben. Gemessen im antriebslosen Flug (DescentAdapter.MeasureAero).
+        // Flug vom 25.09.2026, 21:21: die Stufe hing ohne Steuerflaechen 10 Grad schief im Luftstrom
+        // und der Rumpf drueckte sie mit 0,45 x Widerstand nach UNTEN - bis 40 m/s^2, so viel wie
+        // das Triebwerk. Die Vorhersage kannte das nicht und zuendete 5 km zu spaet.
+        public double LiftRatio;
+        // Sekunden, die die Stufe vor der Zuendung noch ohne Schub faellt, weil sie aus dem Gleiten
+        // zurueckdreht (DescentGuidance setzt sie waehrend des Gleitens). 0 = sofort zuendbereit.
+        public double PreBurnSeconds;
+        public bool LiftKnown;
         // Slope under the projected touchdown point [deg]. On a slope the booster lands on one edge
         // of its base before its centre reaches the ground, so the engines have to be cut higher.
         public double SlopeDegrees;
@@ -104,6 +122,9 @@ namespace BoosterWatch.Guidance
         public bool Abort, Unstoppable;
         // The booster is crossing the sky with the engines dark, leaving the braking to the air.
         public bool Coasting;
+        // Die Stufe gleitet schraeg statt rueckwaerts zu fallen (DescentConfig.GlideSettings).
+        public bool Gliding;
+        public double GlideDegrees;
         // Diagnostics for the coast decision: the total speed the air still has to remove, and the
         // speed the engines could remove over the height that is left.
         public double CoastSpeed, CoastBudget;

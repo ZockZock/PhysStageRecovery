@@ -19,6 +19,11 @@ namespace BoosterWatch
         // Slope under the projected touchdown point [deg], from the flight-path scan. 0 when the
         // booster is coming down on the spot or nothing could be sampled.
         public double SlopeDegrees;
+        // Clearance straight down, before the look-ahead along the flight path lowered it. The
+        // cutoff decision needs this one: "still in the air" is about the ground below.
+        public double GroundClearance;
+        // Lowest point of the hull below the vessel origin, positive downwards [m].
+        public double HullDepth;
         public bool PhysicsActive, ChutesOpen, Eligible, TerrainKnown, HasThrust, PoweredControlled;
     }
 

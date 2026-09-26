@@ -41,11 +41,16 @@ namespace BoosterWatch
             if (owner == null || __instance.deploymentState != ModuleParachute.deploymentStates.ACTIVE) return;
             // Run before the ACTIVE -> SEMIDEPLOYED transition, even if the chute was
             // armed by the staging system. Do not skip thermal or other stock updates.
-            if (owner.BlockParachuteOpening(__instance))
+            // An exception here would break ModuleParachute.FixedUpdate for every canopy in the scene.
+            try
             {
-                Debug.Log("[PhysStageRecovery] Deferred staged chute until safe descent: part=" + __instance.part.flightID);
-                __instance.Disarm();
+                if (owner.BlockParachuteOpening(__instance))
+                {
+                    Debug.Log("[PhysStageRecovery] Deferred staged chute until safe descent: part=" + __instance.part.flightID);
+                    __instance.Disarm();
+                }
             }
+            catch (Exception e) { Debug.LogError("[PhysStageRecovery] Parachute guard (FixedUpdate): " + e); }
         }
 
         public static void AfterDeploymentChecks(ModuleParachute __instance, ref bool __result)

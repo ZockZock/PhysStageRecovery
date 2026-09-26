@@ -15,8 +15,8 @@ namespace BoosterWatch
     // records every tick - the raw readings from KSP alongside every value the law derived from them -
     // so a single flight answers all of them at once.
     //
-    // Sampling: every tick from 0.1 s before ignition, every 0.1 s before that, and every tick in the
-    // last kilometre. The file is written out as it goes, so a crash does not lose it.
+    // Sampling: every tick at ignition and during the burn in the last kilometre, every 0.1 s
+    // otherwise. The file is written out once a second, so a crash loses at most that.
     public sealed class FlightRecorder
     {
         private const double FastInterval = 0.1;
@@ -26,11 +26,12 @@ namespace BoosterWatch
         private readonly string path;
         private double lastSample = double.NegativeInfinity;
         private double lastFlush = double.NegativeInfinity;
-        private bool headerWritten;
-        private int dropped;
+        private int dropped, taken;
+        private bool failureLogged;
 
-        public string Path { get { return path; } }
-        public int Rows { get { return rows.Count; } }
+        // Rows taken since the recorder started (not the unflushed ones: that count went back to 0 on
+        // every flush, and the "every tick below 1 km" rule that read it lost three ticks in five).
+        public int Taken { get { return taken; } }
         public bool Active { get { return path != null; } }
 
         public FlightRecorder(string vesselId, string tag)
@@ -40,6 +41,8 @@ namespace BoosterWatch
                 string plugin = System.IO.Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
                 string dir = System.IO.Path.Combine(plugin, "..", "PluginData", "Flights");
                 Directory.CreateDirectory(dir);
+                // Tag carries date and time to the second: two recorders for one vessel in the same
+                // minute used to append to one file, with a second header in the middle.
                 string name = "flight-" + Short(vesselId) + "-" + tag + ".csv";
                 path = System.IO.Path.GetFullPath(System.IO.Path.Combine(dir, name));
             }
@@ -60,12 +63,15 @@ namespace BoosterWatch
         public void Sample(double time, bool interesting, string line)
         {
             if (path == null) return;
-            bool take = interesting || time - lastSample >= FastInterval || lastSample < -1e8;
+            bool take = interesting || time - lastSample >= FastInterval;
             if (!take) return;
             lastSample = time;
+            taken++;
             if (rows.Count < 200000) rows.Add(line);
             else dropped++;
-            if (time - lastFlush >= 2 || interesting) Flush();
+            // Written out once a second (and at the end): opening the file for every interesting
+            // tick meant ten file operations a second during the burn.
+            if (time - lastFlush >= 1) Flush();
         }
 
         public void Flush()
@@ -74,19 +80,25 @@ namespace BoosterWatch
             try
             {
                 StringBuilder text = new StringBuilder();
-                if (!headerWritten)
-                {
-                    text.Append(Header).Append('\n');
-                    headerWritten = true;
-                }
+                if (!File.Exists(path)) text.Append(Header).Append('\n');
                 foreach (string row in rows) text.Append(row).Append('\n');
-                rows.Clear();
                 File.AppendAllText(path, text.ToString());
+                rows.Clear();
                 lastFlush = lastSample;
             }
-            catch (Exception)
+            catch (Exception e)
             {
-                // A recorder must never be the reason a landing fails.
+                // A recorder must never be the reason a landing fails - but say once why it is silent.
+                // The rows are dropped: kept, they would pile up and be rebuilt every second while
+                // the file stays locked (open in Excel) or the disk is full.
+                dropped += rows.Count;
+                rows.Clear();
+                lastFlush = lastSample;
+                if (!failureLogged)
+                {
+                    failureLogged = true;
+                    UnityEngine.Debug.LogWarning("[PhysStageRecovery] Flugschreiber kann nicht schreiben: " + e.Message);
+                }
             }
         }
 
@@ -109,7 +121,7 @@ namespace BoosterWatch
             + "aimUp,aimOst,aimNord,lage,err,istAcc,"
             + "engines,engOn,flameout,engThr,engFlame,landed,zuendgrund,notes";
 
-        // 51 values. Numbers are written with a fixed culture so a German Windows does not turn the
+        // 58 values. Text is quoted (RFC 4180): the status column contains commas. Numbers are written with a fixed culture so a German Windows does not turn the
         // decimal point into a comma and break every parser, including mine.
         public static string Row(params object[] values)
         {
@@ -119,7 +131,7 @@ namespace BoosterWatch
                 if (i > 0) line.Append(',');
                 object v = values[i];
                 if (v == null) continue;
-                if (v is string) { line.Append((string)v); continue; }
+                if (v is string) { line.Append('"').Append(((string)v).Replace("\"", "\"\"")).Append('"'); continue; }
                 double d = Convert.ToDouble(v, CultureInfo.InvariantCulture);
                 if (double.IsNaN(d) || double.IsInfinity(d)) continue;
                 line.Append(d.ToString("0.######", CultureInfo.InvariantCulture));

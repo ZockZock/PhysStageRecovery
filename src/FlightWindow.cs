@@ -13,7 +13,7 @@ namespace BoosterWatch
         {
             float w = window.width - 36;
             GUI.Label(new Rect(18, 12, w - 120, 30), "PhysStageRecovery", windowTheme.Title);
-            GUI.Label(new Rect(window.width - 125, 17, 60, 22), "0.9.38", windowTheme.Small);
+            GUI.Label(new Rect(window.width - 125, 17, 60, 22), BoosterWatchFlight.Version, windowTheme.Small);
             if (GUI.Button(new Rect(window.width - 48, 14, 30, 28), new GUIContent("×", Loc.Get("#PSR_Window_Close")), windowTheme.Button)) SetVisible(false);
             GUI.Label(new Rect(19, 44, w, 20), Loc.Get("#PSR_Window_Tagline"), windowTheme.Small);
 
@@ -65,6 +65,9 @@ namespace BoosterWatch
             float metricsHeight = narrow ? 136 : 63;
             float imageHeight = Mathf.Max(100, window.height - 310 - metricsHeight);
             cameraViewport = new Rect(18, 210, w, imageHeight);
+            // Bildgroesse = Anzeigefeld. Waehrend des Ziehens am Fensterrand nicht: jede neue Groesse
+            // waere eine neue RenderTexture, Bild fuer Bild.
+            if (!resizing) cameraFeed.SetViewport(w * GUI.matrix.m00, imageHeight * GUI.matrix.m11);
             GUI.Box(cameraViewport, "", windowTheme.Inset);
             bool live = b.Vessel != null && b.Vessel.loaded && !b.Vessel.packed && !b.Finished;
             if (cameraEnabled && cameraFeed.Texture != null && cameraFeed.HasFrame && (live || b.Finished))
@@ -99,7 +102,7 @@ namespace BoosterWatch
             y += metricsHeight + 10;
             string state = PrimaryStatus(b);
             if (!faulted && enabledMod && !b.Finished && b.Sample.PhysicsActive
-                && b.Landing.OwnsControl && b.Landing.Predictive)
+                && b.Landing.OwnsControl)
                 state = Loc.Get(Guidance.DescentPhases.Tag(b.Landing.Phase));
             GUI.Label(new Rect(20, y, w - 155, 28), new GUIContent(Loc.Get("#PSR_Window_State", state), state), windowTheme.Heading);
             double throttle = b.Finished ? 0 : validReadout ? b.Readout.Throttle : double.NaN;
@@ -299,7 +302,7 @@ namespace BoosterWatch
                 if (b.Finished || b.Vessel == null) continue;
                 if (enabledMod && !faulted && oldRange != settings.PhysicsRange) b.RequestRange(settings.PhysicsRange);
                 if (oldPowered != settings.PoweredLanding || oldSpeed != settings.LandingSpeed)
-                { b.Policy.Reset(); b.Landing.Stop("Einstellungen geändert", false); }
+                { b.Policy.Reset(); b.Landing.Stop("Einstellungen geändert"); }
             }
             settingsMessage = Loc.Get("#PSR_Settings_Saved"); GUI.FocusControl(null);
         }

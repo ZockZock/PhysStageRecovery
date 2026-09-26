@@ -138,6 +138,30 @@ class ParachuteGuardTests
         Check(ParachuteDeployment.TryOpen(overLand, true, true,
             2000 + ParachuteDeployment.OpenAboveGround + 100, 2000, out opened) == false,
             "Over high ground a height above the configured one still waits");
+        // Schnell fallend geht der Schirm hoeher auf; Messwerte vom Flug 25.09.2026, 21:57.
+        Check(ParachuteDeployment.OpeningHeight(1100, 150) == 1100,
+            "A normal descent keeps the configured opening height");
+        double at554 = ParachuteDeployment.OpeningHeight(1100, 554);
+        Check(at554 > 1230 && at554 < 1700, "554 m/s: needed 1230 m in flight, opens at " + at554.ToString("0") + " m");
+        double at600 = ParachuteDeployment.OpeningHeight(1100, 742);
+        Check(at600 > 1830 && at600 < 2300, "742 m/s: needed 1830 m in flight, opens at " + at600.ToString("0") + " m");
+        Check(ParachuteDeployment.OpeningHeight(1100, 3000) == ParachuteDeployment.MaximumOpeningHeight,
+            "The opening height is capped");
+        Check(ParachuteDeployment.OpeningHeight(1100, double.NaN) == 1100
+            && ParachuteDeployment.OpeningHeight(1100, -20) == 1100,
+            "No speed keeps the configured height");
+        ModuleParachute fast = new ModuleParachute { deploymentSafeState = ModuleParachute.deploymentSafeStates.SAFE };
+        ParachuteDeployment.OpenAboveGround = 1100;
+        Check(Math.Abs(ParachuteDeployment.SetOpeningHeight(fast, 0, 742) - at600) < 1,
+            "The part's own opening height follows the sink rate (stock inflates semi-deployed canopies at it)");
+        Check(ParachuteDeployment.TryOpen(fast, true, true, 1900, 0, 742, out opened),
+            "A fast booster opens at 1900 m");
+        // Scharf erst kurz vor der Oeffnung: 130 m/s halb offen ab 9,4 km war eine Minute zu lang.
+        double arm = ParachuteDeployment.ArmingHeight(1100, 130);
+        Check(arm > 1100 && arm < 2000, "130 m/s: armed at " + arm.ToString("0") + " m, opened at 1100 m");
+        Check(ParachuteDeployment.ArmingHeight(1100, 742) > ParachuteDeployment.OpeningHeight(1100, 742),
+            "A fast booster is armed above its raised opening height");
+        Check(ParachuteDeployment.ArmingHeight(1100, double.NaN) == 1100, "Without a speed the canopy arms at the setting");
         Console.WriteLine(checks + " Harmony integration checks passed (fixture, not in-game).");
         return 0;
     }

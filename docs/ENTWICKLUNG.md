@@ -50,6 +50,7 @@ Beim Start steht die Kontrolle in `KSP.log`:
 | `v0.9.32` | Oberfläche folgt der Sprache von KSP (125 Tags, en-us + de-de, englischer Text zusätzlich in der DLL) | `docs/BASELINE-0.9.32.md` |
 | `v0.9.37` | Kontrollmodul-Pflicht für die Triebwerkslandung, Anleitung im Fenster, Vorhalt nur um Kerbin, „Ziel-Sinken" als einziges Ziel, nur ein noch geschlossener Schirm zählt | `docs/BASELINE-0.9.37.md` |
 | `v0.9.38` | Eigener Boden unter fernen Boostern (Höhenfeld aus der prozeduralen Oberfläche, `MeshCollider` auf der Gelände-Ebene, unter PQS aufgehängt) — im Flug zweimal als echter Kollisionskontakt belegt | `docs/BASELINE-0.9.38.md` |
+| `v0.9.48` | Gleiten statt Brennen mit Trimmtank und umgekehrten Steuerflächen (Landeverbrauch 12–16 t → ~2,7 t), Schirme erst kurz vor der eingestellten Höhe scharf, normaler Zeitraffer bis 30 s vor dem Eintritt | `docs/BASELINE-0.9.48.md` |
 
 ```powershell
 git log --oneline --decorate          # Historie mit Tags

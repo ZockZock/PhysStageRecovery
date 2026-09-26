@@ -37,9 +37,19 @@ namespace BoosterWatch
         public double AvailableBurnTime { get; private set; }
         // Diagnostics for the log line.
         public double VesselDragCoefficient { get; private set; }
+        // Cd*A der RUECKWAERTS fliegenden Stufe: zuletzt gemessen, als die Achse hoechstens
+        // AxialToleranceDegrees von der Gegenrichtung der Bahn abwich. Waehrend des Gleitens ist
+        // der aktuelle Wert drei- bis viermal groesser; die Vorhersage plant aber die Bremszuendung,
+        // die rueckwaerts geflogen wird, und bekommt deshalb diesen Wert (siehe Build).
+        public double AxialDragCoefficient { get; private set; } = double.NaN;
+        // 3 Grad, nicht 8: bei einem langen Rohr waechst Cd*A mit dem Winkel steil (Flug vom
+        // 25.09.2026: 0,8 bei 0,5 Grad, 2,4 bei 3 Grad, 6,1 bei 8 Grad). Bei 8 Grad eingefroren ist
+        // es kein Rueckwaerts-Wert mehr, und zu viel Widerstand in der Planung heisst: zu spaet zuenden.
+        private const double AxialToleranceDegrees = 3;
+        // Aktueller Winkel zwischen Stufenachse und Rueckwaerts-Richtung [Grad].
+        public double AngleOfAttack { get; private set; } = double.NaN;
         public int Engines { get; private set; }
         public bool EnginesUsable { get { return Engines > 0; } }
-        public string EngineNote = "";
 
         public double AirDensity(double altitudeAsl)
         {
@@ -258,12 +268,74 @@ namespace BoosterWatch
             VesselDragCoefficient = areaDrag;
             VesselDragCd = coefficient;
             double speed = vessel.srf_velocity.magnitude;
+            AngleOfAttack = speed > 1 ? Vector3d.Angle((Vector3d)vessel.ReferenceTransform.up, -vessel.srf_velocity) : double.NaN;
+            // KSP rechnet die Widerstandswuerfel nur in der Luft neu; darueber steht der alte Wert
+            // (Flug vom 25.09.2026: 24,9 "rueckwaerts" aus 270 km, gemessen an einer taumelnden Stufe).
+            bool inAir = vessel.atmDensity > 1e-5 && speed > 50;
+            if (inAir && RecoveryPolicy.Finite(AngleOfAttack) && AngleOfAttack <= AxialToleranceDegrees && areaDrag > 0)
+                AxialDragCoefficient = areaDrag;
+            if (areaDrag > 0 && inAir
+                && (!RecoveryPolicy.Finite(MinimumDragCoefficient) || areaDrag < MinimumDragCoefficient))
+                MinimumDragCoefficient = areaDrag;
+            RetroDragCoefficient = inAir ? RetroDrag(vessel) : double.NaN;
             double density = AirDensityNow(vessel);
             double mass = Math.Max(0.001, vessel.GetTotalMass());
             // 0.5 * rho * v^2 * Cd*A is a force in newtons; the mass is in tonnes.
             DragAcceleration = areaDrag <= 0 || density <= 0 ? 0
                 : 0.5 * density * speed * speed * areaDrag / (1000 * mass);
             if (!RecoveryPolicy.Finite(DragAcceleration) || DragAcceleration < 0) DragAcceleration = 0;
+            MeasureLift(vessel, speed);
+        }
+
+        // Auftrieb des Rumpfes, aus dem, was die Stufe wirklich spuert: Vessel.perturbation ist
+        // KSPs geglaettete Beschleunigung ohne Schwerkraft (dieselbe Zahl wie die G-Anzeige). Ohne
+        // Schub ist das reine Aerodynamik: entlang der Bahn der Widerstand, quer dazu der Auftrieb.
+        // Gemessen wird nur ohne Schub und bei spuerbarem Widerstand; waehrend der Zuendung bleibt
+        // der letzte Wert stehen. Der Rumpfauftrieb haengt am Anstellwinkel, und den haelt eine
+        // Stufe ohne Steuerflaechen im dichten Teil der Luft ohnehin nicht selbst.
+        private void MeasureLift(Vessel vessel, double speed)
+        {
+            double now = Planetarium.GetUniversalTime();
+            if (RecoveryPolicy.Finite(liftTime) && now < liftTime) { LiftRatio = double.NaN; liftTime = double.NaN; }
+            bool thrust = false;
+            foreach (Part part in vessel.parts)
+                foreach (ModuleEngines engine in part.FindModulesImplementing<ModuleEngines>())
+                    if (engine.finalThrust > 0.01f) thrust = true;
+            Thrusting = thrust;
+            Vector3d aero = vessel.perturbation;
+            if (thrust || speed < 50 || !RecoveryPolicy.Finite(aero.x) || !RecoveryPolicy.Finite(aero.y)
+                || !RecoveryPolicy.Finite(aero.z)) return;
+            Vector3d flight = vessel.srf_velocity / speed;
+            double along = Vector3d.Dot(aero, flight);
+            double ratio;
+            Vector3d normal = UpNormal(vessel, flight);
+            if (normal.sqrMagnitude < 0.5) return;
+            if (!LiftPolicy.Ratio(-along, Vector3d.Dot(aero, normal), out ratio)) return;
+            double dt = RecoveryPolicy.Finite(liftTime) ? now - liftTime : double.PositiveInfinity;
+            LiftRatio = LiftPolicy.Smooth(LiftRatio, ratio, dt);
+            liftTime = now;
+        }
+
+        // Senkrecht zur Bahn, in der Ebene aus Bahn und Lotrechter, nach oben. Bei fast senkrechtem
+        // Fall gibt es kein Oben quer zur Bahn: dann Null, und die Messung faellt aus.
+        private static Vector3d UpNormal(Vessel vessel, Vector3d flight)
+        {
+            Vector3d up = (vessel.CoMD - vessel.mainBody.position).normalized;
+            Vector3d normal = up - Vector3d.Dot(up, flight) * flight;
+            return normal.magnitude < 0.1 ? Vector3d.zero : normal.normalized;
+        }
+
+        // Rumpfauftrieb / Widerstand, oben positiv; NaN solange nichts gemessen ist.
+        public double LiftRatio { get; private set; } = double.NaN;
+        private double liftTime = double.NaN;
+        // Frisch genug, um damit zu planen.
+        public bool LiftKnown
+        {
+            get
+            {
+                return RecoveryPolicy.Finite(LiftRatio) && RecoveryPolicy.Finite(liftTime)
+                    && Planetarium.GetUniversalTime() - liftTime < LiftPolicy.HoldSeconds;
+            }
         }
 
         // The game's own density for the vessel, and the corridor table as the fallback. Both come
@@ -274,6 +346,39 @@ namespace BoosterWatch
             double live = vessel.atmDensity;
             if (RecoveryPolicy.Finite(live) && live > 0) return live;
             return AirDensity(vessel.altitude);
+        }
+
+        // Cd*A, das die Stufe genau rueckwaerts fliegend JETZT haette (bei der aktuellen Machzahl),
+        // gerechnet mit KSPs eigenen Widerstandswuerfeln: dieselbe Rechnung wie in
+        // FlightIntegrator.UpdateAerodynamics (DragCubes.SetDrag mit der Anstroemrichtung), nur mit
+        // der Rueckwaerts-Richtung - danach wird jeder Wuerfel mit KSPs eigener Richtung
+        // zurueckgesetzt, die naechste Physikrunde rechnet ohnehin neu.
+        //
+        // Grund (Flug vom 25.09.2026, 22:39): der bei "hoechstens 3 Grad" gemessene Rueckwaerts-
+        // Wert war 2,2 - bei einem langen Rohr waechst Cd*A mit jedem Grad um ~0,7. Unter Schub
+        // genau rueckwaerts waren es 0,8. Die Vorhersage plante mit fast dreifacher Luftbremse,
+        // zuendete bei 9 km zu spaet und die Stufe schlug mit 95 m/s auf.
+        public double RetroDragCoefficient { get; private set; } = double.NaN;
+        private static double RetroDrag(Vessel vessel)
+        {
+            try
+            {
+                Transform reference = vessel.ReferenceTransform;
+                if (reference == null) return double.NaN;
+                Vector3 nose = reference.up;
+                float mach = (float)vessel.mach;
+                double area = 0;
+                foreach (Part part in vessel.parts)
+                {
+                    if (part.DragCubes.None || part.ShieldedFromAirstream || part.partTransform == null) continue;
+                    // KSP uebergibt -lokal(Flugrichtung); rueckwaerts ist die Flugrichtung -Bug.
+                    part.DragCubes.SetDrag(part.partTransform.InverseTransformDirection(nose), mach);
+                    area += part.DragCubes.AreaDrag * PhysicsGlobals.DragCubeMultiplier * PhysicsGlobals.DragMultiplier;
+                    if (part.dragVectorDirLocal.sqrMagnitude > 0.5f) part.DragCubes.SetDrag(part.dragVectorDirLocal, mach);
+                }
+                return area > 0 && RecoveryPolicy.Finite(area) ? area : double.NaN;
+            }
+            catch (Exception) { return double.NaN; }
         }
 
         // Dimensionless drag coefficient of the hull, for the log. Cd*A is what the force uses.
@@ -296,8 +401,12 @@ namespace BoosterWatch
         // `trackedSlope` is the slope the tracker measured under the projected touchdown point,
         // using the same ground sources and plausibility rules as the landing height itself. When
         // it is not available (no tracker reading yet) the adapter's own forward scan stands.
-        public DescentState Build(Vessel vessel, double clearance, double time, double bottomOffset,
-            double trackedSlope)
+        //
+        // `hullDepth` is the lowest hull point below the vessel origin, positive downwards - the sign
+        // GroundScan expects. (Until 0.9.39 the negative offset was passed, so every forward sample
+        // read twice the hull depth too high and rising ground ahead was only seen very late.)
+        public DescentState Build(Vessel vessel, double clearance, double time, double hullDepth,
+            double trackedSlope, bool gliding)
         {
             Vector3d up, east, north;
             HorizonFrame(vessel, out up, out east, out north);
@@ -315,7 +424,7 @@ namespace BoosterWatch
                 drift = drift / horizontalSpeed;
                 double ahead, slope;
                 if (GroundScan.AlongFlightPath(vessel.CoMD, vessel.altitude, up, drift, horizontalSpeed,
-                    bottomOffset, TerrainHeightAt(vessel), out ahead, out slope))
+                    hullDepth, TerrainHeightAt(vessel), out ahead, out slope))
                 {
                     LookingAhead = true;
                     // The tracker's slope wins when it has one: it comes from the ground sources the
@@ -338,9 +447,15 @@ namespace BoosterWatch
                 Gravity = GravityAt(vessel, vessel.altitude),
                 ThrustAcceleration = ThrustAccelerationAt(vessel.altitude),
                 AirDensity = AirDensityNow(vessel),
+                // Der gemessene Wert fuer das Fallen bis zur Zuendung (beim Gleiten der Gleit-Wert,
+                // schief haengend der schiefe). Fuer die Zuendung selbst BurnDrag.
                 DragCoefficient = VesselDragCoefficient,
+                BurnDragCoefficient = BurnDrag(gliding),
                 DragValid = true,
+                AxialDragKnown = RecoveryPolicy.Finite(AxialDragCoefficient),
                 DragAcceleration = DragAcceleration,
+                LiftRatio = LiftRatio,
+                LiftKnown = LiftKnown,
                 AvailableDeltaV = AvailableDeltaV,
                 AvailableBurnTime = AvailableBurnTime,
                 SlopeDegrees = SlopeDegrees,
@@ -348,6 +463,27 @@ namespace BoosterWatch
             };
             return state;
         }
+
+        // Unter Schub gilt, was gerade gemessen wird. Vor der Zuendung: der gemessene Wert, aber
+        // hoechstens BurnDragShare davon, und nie weniger als der Rueckwaerts-Wert.
+        public const double BurnDragShare = 0.6;
+        // Gleitet die Stufe (oder hat sie erfolgreich geglitten), kann sie ihre Lage halten und fliegt
+        // die Zuendung rueckwaerts: dann
+        // gilt der Rueckwaerts-Wert (oder, solange der nie gemessen wurde, der kleinste gemessene).
+        private double BurnDrag(bool gliding)
+        {
+            double now = VesselDragCoefficient;
+            if (Thrusting || !RecoveryPolicy.Finite(now) || now <= 0) return now;
+            double axial = RecoveryPolicy.Finite(RetroDragCoefficient) ? RetroDragCoefficient
+                : RecoveryPolicy.Finite(AxialDragCoefficient) ? AxialDragCoefficient
+                : RecoveryPolicy.Finite(MinimumDragCoefficient) ? MinimumDragCoefficient : double.NaN;
+            if (gliding) return RecoveryPolicy.Finite(axial) ? Math.Min(now, axial) : BurnDragShare * now;
+            return Math.Min(now, Math.Max(RecoveryPolicy.Finite(axial) ? axial : 0, BurnDragShare * now));
+        }
+        // Kleinstes Cd*A, das in der Luft gemessen wurde (Ersatz fuer den Rueckwaerts-Wert, wenn die
+        // Stufe nie ruhig rueckwaerts lag, etwa weil sie taumelnd in die Atmosphaere kam).
+        public double MinimumDragCoefficient { get; private set; } = double.NaN;
+        public bool Thrusting { get; private set; }
 
         // The clearance of the ground directly below, before the flight-path scan is applied - the
         // number the old code produced and the one the log line compares the scan against.

@@ -30,6 +30,8 @@ namespace BoosterWatch.Guidance
         public double CalculatedAt, CalculationMilliseconds;
         public int Candidates;
         public bool UsedBestEffort;
+        // Mit Zurueckdrehen aus dem Gleiten gerechnet (DescentState.PreBurnSeconds).
+        public double PreBurnSeconds;
         public string FailureReason;
     }
 
@@ -135,7 +137,7 @@ namespace BoosterWatch.Guidance
         private sealed class Corridor
         {
             public DescentState Initial;
-            public double Mass, DryMass, Flow, Datum, Radius;
+            public double Mass, DryMass, Flow, Datum, Radius, LiftRatio, BurnDrag, BurnLiftRatio, PreBurnSeconds;
             public double[] Density, Gravity, Thrust;
         }
         private struct Point { public double Height, Sink, Lateral, Time; }
@@ -143,6 +145,8 @@ namespace BoosterWatch.Guidance
         {
             public bool Complete, Safe, Dry;
             public double Speed, CaptureSpeed, CaptureLateral, Seconds, DeltaV;
+            // Wo die Zuendung wirklich beginnt (nach dem Zurueckdrehen aus dem Gleiten).
+            public double StartHeight, StartTime;
         }
         private static bool Finite(double x) { return !double.IsNaN(x) && !double.IsInfinity(x); }
         private static double Clamp(double x, double low, double high) { return Math.Max(low, Math.Min(high, x)); }
@@ -150,7 +154,20 @@ namespace BoosterWatch.Guidance
         private Corridor Prepare(DescentState state, double mass)
         {
             var c = new Corridor { Initial = state, Mass = mass, Datum = state.AltitudeAsl - state.Clearance,
-                Radius = engines == null ? 0 : engines.BodyRadius };
+                Radius = engines == null ? 0 : engines.BodyRadius, LiftRatio = PlannedLiftRatio(state),
+                BurnDrag = PlannedBurnDrag(state),
+                PreBurnSeconds = Finite(state.PreBurnSeconds) ? Math.Max(0, state.PreBurnSeconds) : 0 };
+            // Der Abtrieb kommt vom selben schiefen Anstellwinkel wie der Mehrwiderstand und geht mit
+            // ihm zurueck, wenn sich die Stufe unter Schub aufrichtet (Flug vom 25.09.2026: -0,45 im
+            // Fallen, -0,27 in der Zuendung bei 0,7-fachem Cd*A).
+            double coastDrag = Math.Max(0, state.DragCoefficient);
+            c.BurnLiftRatio = coastDrag > 1e-9 ? c.LiftRatio * Clamp(c.BurnDrag / coastDrag, 0, 1) : c.LiftRatio;
+            // Beim Gleiten traegt der gemessene Auftrieb bis zum Zurueckdrehen auch nach oben: genau
+            // dafuer wird geglitten, und ohne ihn hielt die Vorhersage jede Landung fuer aussichtslos,
+            // weil die Stufe laenger in der dichten Luft bleibt, als sie ohne Auftrieb rechnete.
+            // Fuer das Drehen und die Zuendung bleibt es beim Abtrieb allein (BurnLiftRatio).
+            if (c.PreBurnSeconds > 0 && state.LiftKnown && Finite(state.LiftRatio))
+                c.LiftRatio = Clamp(state.LiftRatio, -1, 1);
             double vacuum = Math.Max(0, model.ThrustAccelerationVacuum);
             c.Flow = engines != null ? engines.FullMassFlow
                 : mass * vacuum / Math.Max(1, config.Predictor.SpecificImpulse * 9.80665);
@@ -179,22 +196,46 @@ namespace BoosterWatch.Guidance
             int i = Math.Min((int)x, table.Length - 2);
             return table[i] + (table[i + 1] - table[i]) * (x - i);
         }
-        private double Drag(Corridor c, Point p, double mass)
+        private double Drag(Corridor c, Point p, double mass, bool burn = false)
         {
             return 0.5 * Sample(c.Density, p.Height) * (p.Sink * p.Sink + p.Lateral * p.Lateral)
-                * Math.Max(0, c.Initial.DragCoefficient) / Math.Max(1, mass)
+                * Math.Max(0, burn ? c.BurnDrag : c.Initial.DragCoefficient) / Math.Max(1, mass)
                 * Clamp(config.Predictor.DragEffectiveness, 0, 1);
         }
+
+        // Cd*A fuer die Zuendung. Unter Schub hat die Stufe ihre Schwenkduese und richtet sich auf
+        // (Flug vom 25.09.2026: 6,5 vor der Zuendung, 4,9 / 4,5 / 3,2 in 7 / 5 / 1 km) - mit dem
+        // Wert aus dem Gleit- oder Schieflagenflug plante die Vorhersage zu viel Luftbremse.
+        internal static double PlannedBurnDrag(DescentState state)
+        {
+            double now = Math.Max(0, state.DragCoefficient);
+            if (!Finite(state.BurnDragCoefficient) || state.BurnDragCoefficient <= 0) return now;
+            return Math.Min(now, state.BurnDragCoefficient);
+        }
+        // Gemessener Rumpfauftrieb, nur der nach UNTEN: ein Auftrieb nach oben kann verschwinden,
+        // sobald die Stufe fuer die Zuendung zurueckdreht, und darf die Zuendung nie nach hinten
+        // schieben. Einer nach unten kommt von einer Stufe, die schief im Luftstrom haengt und das
+        // nicht aendern kann - der bleibt, bis die Luft nachlaesst.
+        internal static double PlannedLiftRatio(DescentState state)
+        {
+            if (!state.LiftKnown || !Finite(state.LiftRatio)) return 0;
+            return Clamp(state.LiftRatio, -1, 0);
+        }
+
         // Spherical local components include curvature. Drag opposes the whole velocity,
         // but only its vertical component supports weight. dt is limited by the drag timescale.
-        private Point Integrate(Corridor c, Point p, double drag, double upThrust, double lateralThrust, double dt)
+        // Lift acts along the upward normal of the path, (sink, lateral)/speed in (lateral, up).
+        private Point Integrate(Corridor c, Point p, double drag, double upThrust, double lateralThrust, double dt,
+            bool burn = false)
         {
             double speed = Math.Sqrt(p.Sink * p.Sink + p.Lateral * p.Lateral);
             double radius = c.Radius > 0 ? Math.Max(1, c.Radius + c.Datum + p.Height) : double.PositiveInfinity;
+            double lift = (burn ? c.BurnLiftRatio : c.LiftRatio) * drag;
             double aSink = Sample(c.Gravity, p.Height) - p.Lateral * p.Lateral / radius - upThrust
-                - (speed > 1e-9 ? drag * p.Sink / speed : 0);
+                - (speed > 1e-9 ? drag * p.Sink / speed + lift * Math.Abs(p.Lateral) / speed : 0);
             double aLateral = lateralThrust + p.Sink * p.Lateral / radius
-                - (speed > 1e-9 ? drag * p.Lateral / speed : 0);
+                - (speed > 1e-9 ? drag * p.Lateral / speed : 0)
+                + (speed > 1e-9 ? lift * p.Sink / speed * Math.Sign(p.Lateral) : 0);
             double sink = p.Sink + aSink * dt;
             return new Point { Height = p.Height - 0.5 * (p.Sink + sink) * dt,
                 Sink = sink, Lateral = p.Lateral + aLateral * dt, Time = p.Time + dt };
@@ -228,6 +269,21 @@ namespace BoosterWatch.Guidance
         private Trial Burn(Corridor c, Point start, DescentGuidance active = null)
         {
             candidates++;
+            // Gleitet die Stufe gerade, ist jeder Kandidat das Ende des Gleitens: sie dreht zurueck und
+            // faellt die Vorlaufzeit schon mit dem Rueckwaerts-Widerstand, erst dann zuendet sie.
+            if (active == null && c.PreBurnSeconds > 0)
+            {
+                double end = start.Time + c.PreBurnSeconds;
+                for (int i = 0; i < 20000 && start.Time < end && start.Height > 0; i++)
+                {
+                    // Waehrend des Drehens liegt der Widerstand zwischen Gleit- und Rueckwaerts-Wert.
+                    double d = 0.5 * (Drag(c, start, c.Mass, true) + Drag(c, start, c.Mass));
+                    double step = Math.Min(end - start.Time, StepSize(start, d, 0.1));
+                    Point next = Integrate(c, start, d, 0, 0, step, true);
+                    if (!Finite(next.Height) || !Finite(next.Sink) || !Finite(next.Lateral)) break;
+                    start = next;
+                }
+            }
             var law = active == null ? new DescentGuidance(config, null) : active.CopyForPrediction();
             if (active == null) law.BeginPredictionBurn();
             Point p = start;
@@ -235,12 +291,13 @@ namespace BoosterWatch.Guidance
             double sinceCommand = active == null ? -1 : active.BurnAge(start.Time);
             double capture = config.Predictor.CaptureAltitude;
             bool captured = start.Height <= capture;
-            Trial result = new Trial { CaptureSpeed = double.PositiveInfinity, CaptureLateral = double.PositiveInfinity };
+            Trial result = new Trial { CaptureSpeed = double.PositiveInfinity, CaptureLateral = double.PositiveInfinity,
+                StartHeight = start.Height, StartTime = start.Time };
             if (captured) { result.CaptureSpeed = Math.Sqrt(p.Sink * p.Sink + p.Lateral * p.Lateral); result.CaptureLateral = Math.Abs(p.Lateral); }
             for (int i = 0; i < 40000 && elapsed <= config.Predictor.MaxSeconds; i++)
             {
                 if ((i & 63) == 0) token.ThrowIfCancellationRequested();
-                double drag = Drag(c, p, mass);
+                double drag = Drag(c, p, mass, true);
                 double dt = StepSize(p, drag, Clamp(config.Predictor.TimeStep, 0.01, 0.2));
                 double available = Sample(c.Thrust, p.Height) * c.Mass / mass;
                 DescentState state = c.Initial;
@@ -289,7 +346,7 @@ namespace BoosterWatch.Guidance
                         else { up = command.Up; east = command.East; }
                     }
                 }
-                Point next = Integrate(c, p, drag, acceleration * up, acceleration * east, dt);
+                Point next = Integrate(c, p, drag, acceleration * up, acceleration * east, dt, true);
                 if (!Finite(next.Height) || !Finite(next.Sink) || !Finite(next.Lateral)) return result;
                 if (!captured && next.Height <= capture)
                 {
@@ -371,9 +428,13 @@ namespace BoosterWatch.Guidance
             Trial chosen = new Trial(), effort = new Trial();
             // Search from late to early: the first safe candidate bounds the latest safe
             // burn. Early, long burns need not all be integrated on every update.
+            int lastIndex = -1;
             for (int i = samples; i >= 0; i--)
             {
                 int index = i * (coast.Count - 1) / samples;
+                // A short coast maps several candidates onto the same point; integrate each once.
+                if (index == lastIndex) continue;
+                lastIndex = index;
                 Trial trial = Burn(c, coast[index]);
                 // If no candidate reaches every target, retain the least-bad complete plan.
                 // "No perfect plan" must not mean "burn now" if a later burn is clearly better.
@@ -409,28 +470,15 @@ namespace BoosterWatch.Guidance
                     + 2 * Sample(c.Gravity, 0) * config.Terminal.EngineCutoffAltitude) + 2;
             }
             result.Valid = true;
-            result.IgnitionAltitude = coast[best].Height; result.IgnitionTime = coast[best].Time;
-            result.IgnitionNeeded = best == 0 || result.IgnitionTime - state.Time <= config.Predictor.UpdateInterval;
+            result.PreBurnSeconds = c.PreBurnSeconds;
+            result.IgnitionAltitude = chosen.StartHeight; result.IgnitionTime = chosen.StartTime;
+            result.IgnitionNeeded = (best == 0 && c.PreBurnSeconds <= 0)
+                || result.IgnitionTime - state.Time <= config.Predictor.UpdateInterval;
             result.TouchdownSpeed = chosen.Speed;
             result.CaptureSpeed = chosen.CaptureSpeed; result.CaptureLateralSpeed = chosen.CaptureLateral;
             result.SpeedMargin = config.Predictor.CaptureSpeed + 3 - chosen.CaptureSpeed;
             result.BurnSeconds = chosen.Seconds; result.RequiredDeltaV = chosen.DeltaV;
             return result;
-        }
-        public double CoastArrival(DescentState state, double mass)
-        {
-            if (!state.Valid || mass <= 1 || state.Clearance < 0) return double.NaN;
-            Corridor c = Prepare(state, mass);
-            if (c == null) return double.NaN;
-            Point p = new Point { Height = state.Clearance, Sink = state.Sink, Lateral = state.LateralSpeed, Time = state.Time };
-            for (int i = 0; i < 40000 && p.Time - state.Time < config.Predictor.MaxSeconds; i++)
-            {
-                double drag = Drag(c, p, mass);
-                p = Integrate(c, p, drag, 0, 0, StepSize(p, drag, 0.1));
-                if (!Finite(p.Height)) break;
-                if (p.Height <= 0) return Math.Sqrt(p.Sink * p.Sink + p.Lateral * p.Lateral);
-            }
-            return double.NaN;
         }
     }
 }

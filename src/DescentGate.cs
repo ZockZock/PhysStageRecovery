@@ -9,7 +9,6 @@ namespace BoosterWatch
         private bool hasSample;
         private double lastTime, lastAltitude, peakAltitude, descendingSeconds;
         public bool Ready { get; private set; }
-        public double DescendingSeconds { get { return descendingSeconds; } }
 
         public void Reset() { hasSample = false; Ready = false; descendingSeconds = 0; }
 

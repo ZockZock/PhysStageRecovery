@@ -97,7 +97,7 @@ class KspSettingsTests
         Check(picked.Save(), "The straightened target saves");
         string saved = File.ReadAllText(target);
         Check(!saved.Contains("touchdownSpeed"), "The retired second key is removed from the file");
-        Check(saved.Contains("configVersion = 7"), "Settings are marked as straightened");
+        Check(saved.Contains("configVersion = " + Settings.CurrentVersion), "Settings are marked as straightened");
         Settings again = Settings.Load(target);
         Check(again.TouchdownSpeed == 3 && again.LandingSpeed == 3,
             "One target survives a reload, from one key");
@@ -134,18 +134,16 @@ class KspSettingsTests
         Settings carried = Settings.Load(legacyLanding);
         Check(Math.Abs(carried.TouchdownSpeed - 3.5) < 1e-9,
             "The old target speed becomes the new law's touchdown speed");
-        Check(carried.GuidanceMode == GuidanceMode.Predictive,
-            "An installation without the key flies the predictive law by default");
         string landingText = File.ReadAllText(legacyLanding);
-        Check(landingText.Contains("guidanceMode") && landingText.Contains("landingSpeed")
+        Check(!landingText.Contains("guidanceMode") && landingText.Contains("landingSpeed")
             && landingText.Contains("terminalAltitude") && landingText.Contains("tiltLimit")
             && landingText.Contains("thrustReserve") && !landingText.Contains("touchdownSpeed"),
             "The new landing settings are written into the file for the player to edit");
         Settings chosen = Settings.Load(legacyLanding);
-        chosen.GuidanceMode = GuidanceMode.Legacy; chosen.TouchdownSpeed = 2.5; chosen.TerminalAltitude = 120;
+        chosen.TouchdownSpeed = 2.5; chosen.TerminalAltitude = 120;
         Check(chosen.Save(), "The new landing settings save through the real KSP ConfigNode");
         Settings back = Settings.Load(legacyLanding);
-        Check(back.GuidanceMode == GuidanceMode.Legacy && Math.Abs(back.TouchdownSpeed - 2.5) < 1e-9
+        Check(Math.Abs(back.TouchdownSpeed - 2.5) < 1e-9
             && Math.Abs(back.TerminalAltitude - 120) < 1e-9,
             "Landing mode, touchdown speed and terminal altitude survive a reload");
         string boundsPath = System.IO.Path.Combine(dir, "camera-bounds.cfg");

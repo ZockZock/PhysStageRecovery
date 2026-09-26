@@ -21,9 +21,6 @@ namespace BoosterWatch
             return v != null && v.loaded && v.parts.Any(p => p.FindModulesImplementing<ModuleWheelBrakes>().Count > 0);
         }
 
-        public static bool GearDown(Vessel v) { return v != null && v.ActionGroups[KSPActionGroup.Gear]; }
-        public static bool BrakesOn(Vessel v) { return v != null && v.ActionGroups[KSPActionGroup.Brakes]; }
-
         // Lower everything that can be lowered. Safe to call every tick.
         public static bool DeployGear(Vessel v, out string state)
         {

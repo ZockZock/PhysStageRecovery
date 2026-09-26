@@ -85,14 +85,9 @@ namespace BoosterWatch.Guidance
             // altitude than a vacuum formula would.
             public double IgnitionDelay = 0.5;
             public double ThrustRampSeconds = 0.7;
-            // Speed still allowed at the cut-off height when the forecast is solved backwards.
-            public double TargetTouchdownSpeed = 5;
             // Samples in the coarse sweep over the ignition altitude.
             public int CoarseSamples = 20;
             public int BisectionSteps = 10;
-            // Thrust is assumed to be off during the coast, because the guidance flies coast
-            // phases retrograde with the engines dark.
-            public double CoastSteeringLoss = 1.0;
             public double BurnSteeringLoss = 0.985;
             // How much of the hull's drag the forecast may count on. Drag always opposes the
             // velocity, so it always helps - but a burning booster leans to steer, and not all of
@@ -141,88 +136,65 @@ namespace BoosterWatch.Guidance
             // landing. 0.35 is the value the entry profile needs; it stays under the ballistic fall
             // at every altitude.
             public double ProfileFraction = 0.05;
-            // The margin by which the forecast's arrival speed may exceed the target before the
-            // burn is due. Together with the forecast this is the ignition trigger.
-            public double IgnitionSpeedMargin = 20;
-            // The arrival speed at which the coast is abandoned because the descent can no longer be
-            // stopped at all. It used to be "two metres per second over target", which is not an
-            // emergency: it cancelled the coast on a predicted arrival of 7 m/s and lit the engines in
-            // the stratosphere. 40 m/s is a crash by any standard and by then the burn is genuinely
-            // the last chance.
-            public double CoastAbortSpeed = 40;
-            // Reserve on the braking DISTANCE, not on the arrival speed. A booster falling fast has
-            // almost no height between "the burn would still arrive gently" and "too late": measured
-            // on a light 7.4 t rocket, the forecast ordered the burn at 2215 m with 314 m/s of sink,
-            // and stopping that needs 3650 m at the engines it had. Igniting with this factor on the
-            // braking distance covers the spool-up and the model being wrong.
-            public double IgnitionReserve = 1.3;
-            // How hard the law pulls the sink rate onto the ladder, per m/s of deviation and per
-            // second. The "stop by the ground" term alone is far too patient: at 3 km with 204 m/s of
-            // sink against a ladder of 80 it asks for 5.9 m/s^2, the vehicle converges slowly, and
-            // the recorded landing arrived with 29 m/s still on it. Following a ladder means paying
-            // for the deviation, not for the ground.
-            public double LadderGain = 0.5;
-            // The landing-burn profile: above this height the engines stay dark whatever the
-            // arithmetic says, because the atmosphere is the brake and the propellant is for the
-            // landing. Below it - and only below it - the profile can order a burn on its own.
-            // Below this air density NOTHING is decided - no coast budget, no ignition. In near
-            // vacuum the only honest answer is "keep falling": a forecast up there describes a burn
-            // that starts now and runs to the ground, in air this thin that always reads as "arrives
-            // too hard", and the law lit up in the stratosphere on the strength of it. 1e-3 kg/m^3 is
-            // about 35 km on Kerbin, where the air a returning booster actually brakes in begins.
-            // A nearly empty booster is assumed to manage at least this much acceleration, whatever
-            // its part data says about it when it was heavy. The mass that matters for the END of the
-            // burn is the dry one, and a booster that looks unable to brake at all while full of
-            // propellant - 12 m/s^2 of thrust against 9.8 of gravity - brakes perfectly well once the
-            // tanks are nearly empty. Without this the law refused to plan a burn for exactly the
-            // boosters that need one.
-            public double EmptyBrakingFloor = 25;
-            // Hard ceiling for the burn, in metres above ground. Above it the engines stay dark
-            // whatever any prediction says.
-            //
-            // The physics gate below (the air must be braking at least half of gravity) is the useful
-            // rule and it is per vehicle - but it is still a MODEL, and a model that is wrong lights
-            // the engines at 30 km. Measured: the booster burned its whole landing propellant on the
-            // way down, arrived at 760 m with dry tanks and hit at 110 m/s. This is the guard that
-            // cannot be argued with, and it costs nothing: no booster has ever needed to brake in the
-            // stratosphere on the way to a landing.
-            public double BurnCeiling = 20000;
-            public double PlanningDensity = 1e-2;
-            public double CoastFloor = 200;
-            // The last resort: inside this height a sink rate above the profile is ignited on sight,
-            // without asking the forecast.
-            public double IgnitionBackstop = 100;
-            // While the booster is still crossing the sky it coasts and lets drag brake it. The
-            // phase ends at this height above ground whatever else is true, because below it there
-            // is no longer enough air to do the work and the descent has to own the vehicle.
-            //
-            // Keep it low. The band has to sit under the height at which an ordinary descent starts
-            // its brake, or the coast would end before such a booster has begun and force it into a
-            // long burn from altitude - measured: with the band at 2000 m a booster that should have
-            // landed at 1.8 m/s arrived at 15.8 m/s, because its profile was never flown.
-            public double CoastMargin = 0.5;
-            // Rate of descent used to work out how much time the remaining height buys when the
-            // booster is climbing or barely sinking [m/s].
-            public double CoastTimeReferenceSpeed = 50;
             public double LateralDampingGain = 1.0;
             // Floor under the sideways authority [m/s^2]. The tilt limit scales with the braking
             // budget and collapses when the booster is falling fast, which would leave a crosswind
             // drift uncorrected for the whole descent. This keeps a small amount of tilt available
             // at every point.
             public double MinimumLateralAcceleration = 3.0;
-            // A forecast that still arrives this much too fast is a crash with no manoeuvre left.
-            public double AbortTouchdownMargin = 2.0;
             // Slew limits per physics step, so no command can jump between two ticks.
             public double MaxLateralAccelerationChange = 2.5;
             // Below this speed there is no direction that means anything, so the guidance points
             // up. This single line is what removed the "88 degrees at 103 m" of the old chain.
             public double MinimumSteeringSpeed = 2;
-            // Before this many seconds of flight no descent state is trusted. A vessel KSP has
-            // just created reports motion that does not match its position.
-            public double MinimumFlightSeconds = 3;
+        }
+
+        // Gleitflug im Sinkflug ohne Schub: die Stufe fliegt schraeg statt genau rueckwaerts.
+        //
+        // Rueckwaerts zeigt ein Booster der Luft nur seinen Boden - die kleinste Flaeche, die er hat
+        // (im Flug vom 25.09.2026 Cd*A = 0,3). Schraeg angestellt faengt die Seitenwand Luft: bei 35
+        // Grad etwa das Drei- bis Vierfache an Widerstand, und der Rumpf erzeugt etwas Auftrieb. Der
+        // wird nach OBEN gelegt, damit die Stufe laenger in der dichteren Luft bleibt, statt steil
+        // durchzufallen - das Prinzip des Steins auf dem Wasser, nur mit einem Rohr statt einer
+        // flachen Scheibe: springen wird es nicht, aber es bremst mit Luft statt mit Treibstoff.
+        //
+        // Vor der Zuendung dreht die Stufe rechtzeitig zurueck auf rueckwaerts, damit das Triebwerk
+        // richtig steht. Und der Vorhersage wird der Widerstand der RUECKWAERTS fliegenden Stufe
+        // gegeben (DescentAdapter.AxialDragCoefficient): sie plant die Bremszuendung damit, also mit
+        // dem kleineren Wert - zusaetzliche Bremsung durch das Gleiten verschiebt die Zuendung nur
+        // nach hinten, nie zu spaet.
+        public sealed class GlideSettings
+        {
+            internal GlideSettings Copy() { return (GlideSettings)MemberwiseClone(); }
+            // Anstellwinkel gegen die Flugrichtung [Grad]. 0 schaltet das Gleiten ab.
+            public double AngleDegrees = 35;
+            // Unterhalb dieser Hoehe ueber Grund wird nicht mehr geglitten.
+            // Die Vorhersage entscheidet selbst, wann zurueckgedreht wird; das hier ist nur die Grenze.
+            public double MinimumClearance = 2000;
+            // Erst ab dieser Luftdichte [kg/m^3] lohnt es (Kerbin: etwa 45 km Hoehe).
+            public double MinimumDensity = 3e-4;
+            // Unter dieser Geschwindigkeit bringt der Anstellwinkel kaum noch etwas [m/s].
+            public double MinimumSpeed = 150;
+            // So viele Sekunden vor der geplanten Zuendung steht die Stufe wieder rueckwaerts.
+            // 5 s, nicht 12: bei 700 m/s kosteten 12 s Zurueckdrehen 9 km Hoehe, und der Plan mit Gleiten
+            // hielt jede Landung fuer aussichtslos. Mit Steuerflaechen dreht die Stufe in 3-5 s zurueck.
+            public double IgnitionLeadSeconds = 5;
+            // So lange darf die Stufe brauchen, bis sie im Gleitwinkel liegt und Auftrieb liefert [s].
+            public double LiftCheckSeconds = 10;
+            // Oberhalb dieser Hoehe ueber Grund beginnt das Gleiten auch dann, wenn der Rueckwaerts-Plan
+            // eine baldige Zuendung verlangt: der Plan mit Gleiten wird danach neu gerechnet.
+            public double StartClearance = 12000;
+            // Beim Gleiten Treibstoff vom Triebwerk weg pumpen (FuelTrim), damit die Steuerflaechen
+            // gegen weniger Stabilitaet arbeiten.
+            public bool PumpFuel = true;
+            // Drueckt der Rumpf beim Gleiten nach unten (Auftrieb/Widerstand darunter), haengt die Stufe
+            // auf der falschen Seite im Luftstrom: dann schadet das Gleiten. Ohne Auftrieb bremst es
+            // immer noch mit dem viel groesseren Widerstand und bleibt deshalb erlaubt.
+            public double MinimumLiftRatio = -0.05;
         }
 
         public readonly TerminalSettings Terminal = new TerminalSettings();
+        public readonly GlideSettings Glide = new GlideSettings();
         public readonly PredictorSettings Predictor = new PredictorSettings();
         public readonly ControlSettings Control = new ControlSettings();
 
@@ -232,6 +204,7 @@ namespace BoosterWatch.Guidance
             Terminal = source.Terminal.Copy();
             Predictor = source.Predictor.Copy();
             Control = source.Control.Copy();
+            Glide = source.Glide.Copy();
             // No adapter delegates: a background prediction uses only sampled tables.
         }
         internal DescentConfig Snapshot() { return new DescentConfig(this); }
@@ -268,6 +241,4 @@ namespace BoosterWatch.Guidance
         }
     }
 }
-
-
 

@@ -19,6 +19,16 @@ namespace BoosterWatch.Guidance
     // the height the ignition has to be moved up by.
     internal static class CaptureBraking
     {
+        // Vorrat auf den Schub, den der Abstieg entlang der Bahn braucht.
+        public const double PathMargin = 1.3;
+        // Die Seitenfahrt ist so viele Meter ueber der Aufricht-Hoehe weg.
+        public const double LateralMargin = 25;
+        // Darunter: Restfahrt ueber so viele Sekunden, mit hoechstens ~5 Grad Schraeglage.
+        public const double FinalLateralSeconds = 3;
+        // Unter dieser Seitenfahrt [m/s] wird sie sanft, ueber mindestens SmoothLateralSeconds, abgebaut.
+        public const double SmoothLateralSpeed = 5, SmoothLateralSeconds = 3;
+        public const double FinalLeanTangent = 0.09;
+
         public static void Command(DescentState state, DescentConfig config,
             out double vertical, out double lateral, out bool emergency)
         {
@@ -39,7 +49,27 @@ namespace BoosterWatch.Guidance
             double distance = Math.Max(0.5, state.Clearance - config.Predictor.CaptureAltitude);
             double time = Math.Max(0.25, 2 * distance / Math.Max(1, sink + targetSink));
             double wantedUp = Math.Max(0, gravity - dragUp + (sink - targetSink) / time);
-            double wantedSide = Math.Max(0, side / time - dragSide);
+            // Die Seitenfahrt muss deutlich frueher weg sein als die Sinkrate: fuer die letzten
+            // Meter steht die Stufe aufrecht, und aus einer Schraeglage kommt eine 25-t-Stufe bei
+            // wenig Schub nur langsam heraus. Flug vom 25.09.2026, 22:57 (Zielhoehe 10 m): bis 14 m
+            // 15 Grad Schraeglage gegen 20 m/s Seitenfahrt, darunter "aufrecht" befohlen, die Stufe
+            // brauchte zwei Sekunden dafuer und schob sich dabei mit 4,4 m/s in die Gegenrichtung.
+            // Daher eine eigene, hoehere Frist fuer die Seitenfahrt, und darunter nur noch sanft.
+            double lateralFloor = Math.Max(config.Predictor.CaptureAltitude,
+                config.Terminal.UprightAltitude + LateralMargin);
+            double lateralDistance = state.Clearance - lateralFloor;
+            // Ein kleiner Rest wird nie schaerfer als ueber SmoothLateralSeconds herausgenommen: eine
+            // Frist, die gegen null geht, verlangt kurz davor die groesste Schraeglage - genau dann,
+            // wenn sich die Stufe schon aufrichten muss. Flug vom 25.09.2026, 23:16: bei 52 m 28 Grad
+            // Schraeglage fuer die letzten 4,7 m/s, danach 1,5 s Aufrichten mit 25 Grad Lagefehler,
+            // die Stufe schob sich mit 10 m/s in die Gegenrichtung. Bei grosser Seitenfahrt bleibt die
+            // Frist hart, sonst kaeme sie gar nicht mehr weg.
+            double lateralTime = lateralDistance > 0.5
+                ? Math.Max(side < SmoothLateralSpeed ? SmoothLateralSeconds : 0.25,
+                    2 * lateralDistance / Math.Max(1, sink + targetSink))
+                : FinalLateralSeconds;
+            double wantedSide = Math.Max(0, side / lateralTime - dragSide);
+            if (lateralDistance <= 0.5) wantedSide = Math.Min(wantedSide, wantedUp * FinalLeanTangent);
             double wanted = Math.Sqrt(wantedUp * wantedUp + wantedSide * wantedSide);
 
             // What the airstream leaves of that command. `control` is one when the vehicle can point
@@ -66,7 +96,14 @@ namespace BoosterWatch.Guidance
                 double ceilingSide = side / response;
                 if (up > ceilingUp) up = ceilingUp;
                 if (out2 > ceilingSide) out2 = ceilingSide;
-                limit = thrust;
+                // Aber nicht mehr, als der Abstieg braucht. Entlang der Bahn schiebt der ganze Schub
+                // beide Anteile zugleich; noetig ist so viel, dass der groessere Bedarf gedeckt ist -
+                // mit PathMargin Vorrat. Mehr bremst die Stufe unter die Leiter, und von dort sinkt sie
+                // langsam und teuer: im Nachbau des Fluges vom 25.09.2026 (frueh gezuendet) stand sie
+                // bei 3 km mit 120 m/s und verbrannte den Rest der Tanks im Schwebeflug.
+                double needed = Math.Max(windUp > 1e-3 ? wantedUp / windUp : 0,
+                    windSide > 1e-3 ? wantedSide / windSide : 0);
+                limit = Math.Min(thrust, PathMargin * needed);
             }
             double magnitude = Math.Min(limit, Math.Sqrt(up * up + out2 * out2));
             double norm = Math.Sqrt(up * up + out2 * out2);

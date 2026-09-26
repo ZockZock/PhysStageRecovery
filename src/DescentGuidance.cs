@@ -19,12 +19,9 @@ namespace BoosterWatch.Guidance
     // continuously with the altitude.
     public sealed class DescentGuidance
     {
-        private static readonly double[] NoProfile = new double[0];
 
         private readonly DescentConfig config;
         private readonly DescentPredictor predictor;
-        private double[] densityProfile = NoProfile;
-        private double profileStep = 100, profileTop;
 
         // Continuity state: the commanded lateral acceleration, the throttle and the sink target
         // may only move at a bounded rate from one step to the next, so nothing can jump.
@@ -39,6 +36,18 @@ namespace BoosterWatch.Guidance
         // initial zero-throttle interval; retain the existing attitude law after ignition.
         private bool hasBurnCommand;
         private double firstBurnCommandTime = double.NaN;
+        // One-way: once the lead time before ignition is reached the booster stays backwards. The
+        // replan credits only part of the drag and can push the ignition back out, which toggled the
+        // 35-degree command near the boundary.
+        private bool glideEnded;
+        private double glideStart = double.NaN;
+        private bool glideFailed;
+        // Die Stufe hat geglitten, ohne dass der Rumpf nach unten drueckte: sie laesst sich steuern
+        // und fliegt die Zuendung genau rueckwaerts (DescentAdapter.BurnDrag nimmt dann den
+        // Rueckwaerts-Wert statt eines Anteils am schiefen).
+        public bool Steerable { get { return !double.IsNaN(glideStart) && !glideFailed; } }
+        // Warum das Gleiten beendet wurde, fuer das Log (leer = laeuft oder nie begonnen).
+        public string GlideEndReason { get; private set; } = "";
         internal double BurnAge(double now) { return double.IsNaN(firstBurnCommandTime) ? 0 : Math.Max(0, now - firstBurnCommandTime); }
 
         public DescentGuidance(DescentConfig config, DescentPredictor predictor)
@@ -60,13 +69,12 @@ namespace BoosterWatch.Guidance
                 hasLast = hasLast, lastLateralAcceleration = lastLateralAcceleration,
                 lastThrottle = lastThrottle, lastTargetSink = lastTargetSink,
                 phase = phase, aborted = aborted, ordered = ordered, hasBurnCommand = hasBurnCommand,
+                glideEnded = glideEnded,
                 firstBurnCommandTime = firstBurnCommandTime, LastPrediction = LastPrediction
             };
         }
 
         public DescentPhase Phase { get { return phase; } }
-        // The configuration in force, for tests that need to check what the law is actually using.
-        public DescentConfig ConfigForTest { get { return config; } }
         public DescentPrediction LastPrediction { get; private set; }
         // The whole last decision, for the log line. Handing back the struct rather than a handful
         // of properties keeps the diagnostics and the flight on exactly the same numbers.
@@ -96,35 +104,17 @@ namespace BoosterWatch.Guidance
             ordered = false;
             hasBurnCommand = false;
             firstBurnCommandTime = double.NaN;
+            glideEnded = false;
+            glideStart = double.NaN;
+            glideFailed = false;
+            GlideEndReason = "";
+            LastStep = null;
             ignitionReason = "";
             AbortSpeed = 0;
             LastPrediction = null;
         }
 
         public void CancelPrediction() { if (predictor != null) predictor.Cancel(); }
-
-        // The flight adapter hands over the atmospheric profile around the booster once, so the
-        // forecast works on KSP's own pressure curve instead of an exponential guess. Without a
-        // profile the config default is sampled per altitude.
-        public void SetDensityProfile(float[] samples, double step)
-        {
-            if (samples == null || samples.Length < 2 || step <= 0) { densityProfile = NoProfile; return; }
-            densityProfile = new double[samples.Length];
-            for (int i = 0; i < samples.Length; i++) densityProfile[i] = Math.Max(0, samples[i]);
-            profileStep = step;
-            profileTop = step * (samples.Length - 1);
-        }
-
-        public double DensityAt(double altitude)
-        {
-            if (densityProfile.Length == 0) return config.SampleAirDensity(altitude);
-            if (altitude >= profileTop) return densityProfile[densityProfile.Length - 1];
-            if (altitude <= 0) return densityProfile[0];
-            double x = altitude / profileStep;
-            int i = (int)x;
-            if (i + 1 >= densityProfile.Length) return densityProfile[densityProfile.Length - 1];
-            return densityProfile[i] + (densityProfile[i + 1] - densityProfile[i]) * (x - i);
-        }
 
         // The sink-rate profile, as a function of the height alone. One continuous expression for
         // the whole descent, and its shape is what decides which kind of landing this is:
@@ -195,13 +185,17 @@ namespace BoosterWatch.Guidance
             // What the engines have above local gravity: the braking budget the profile is built
             // from, and the number the tilt limit is scaled from. Negative means the booster cannot
             // hold itself up at all, and the whole descent becomes best effort.
-            double free = thrustAcceleration * (1 - config.Predictor.ThrustReserve) - gravity;
+            double usable = thrustAcceleration * (1 - config.Predictor.ThrustReserve);
+            double free = usable - gravity;
             // A booster whose thrust barely beats gravity gets the whole engine, not the reserved
             // part of it. The reserve pays for attitude control and ignition lag, and a vehicle at
             // TWR 1.3 has nothing to pay it with: keeping 20 % back left it with 0.19 m/s^2 of
             // braking authority and it arrived at 105 m/s. Strong boosters are untouched - their
             // reserve is small change against a large surplus.
-            if (free < 1) free = Math.Max(0.05, thrustAcceleration - gravity);
+            // The vertical command below is clamped to the same `usable`: widening only the budget left
+            // a booster with thrust*0.8 < g clamped under its own weight, sinking faster the whole
+            // final approach.
+            if (free < 1) { usable = thrustAcceleration; free = Math.Max(0.05, thrustAcceleration - gravity); }
             double sink = state.Sink;
             double lateral = state.LateralSpeed;
             // A scheduled but still dark burn can be replanned as new aerodynamic data arrives.
@@ -231,9 +225,12 @@ namespace BoosterWatch.Guidance
             // towards the soft touchdown speed, so the last couple of metres are gentler than the
             // approach without a step in the target.
             double anchor = config.Terminal.TouchdownSpeed;
+            // Never a flare that asks for MORE than the target: with the window's default target of
+            // 0.5 m/s below the 1.5 m/s soft speed the blend ran the wrong way and sped the booster
+            // up in its last 15 m.
+            double soft = Math.Min(config.Terminal.SoftTouchdownSpeed, config.Terminal.TouchdownSpeed);
             if (clearance < config.Terminal.SoftFlareAltitude && config.Terminal.SoftFlareAltitude > 0)
-                anchor = config.Terminal.SoftTouchdownSpeed
-                    + (config.Terminal.TouchdownSpeed - config.Terminal.SoftTouchdownSpeed)
+                anchor = soft + (config.Terminal.TouchdownSpeed - soft)
                     * (clearance / config.Terminal.SoftFlareAltitude);
             double target = TargetSink(clearance, free, anchor, cutoff);
 
@@ -243,7 +240,10 @@ namespace BoosterWatch.Guidance
             double cadence = clearance < 1000 ? 0.1 : config.Predictor.UpdateInterval;
             if (predictor != null && phase != DescentPhase.Touchdown)
             {
-                LastPrediction = predictor.Update(state, mass, hasBurnCommand ? this : null, cadence);
+                // Waehrend des Gleitens plant die Vorhersage das Zurueckdrehen vor der Zuendung mit ein.
+                DescentState planState = state;
+                if (LastStep.HasValue && LastStep.Value.Gliding) planState.PreBurnSeconds = config.Glide.IgnitionLeadSeconds;
+                LastPrediction = predictor.Update(planState, mass, hasBurnCommand ? this : null, cadence);
             }
             DescentPrediction prediction = LastPrediction;
             bool forecastDue = prediction != null && prediction.Valid
@@ -255,6 +255,22 @@ namespace BoosterWatch.Guidance
                     || clearance / Math.Max(1, sink) < 5)
                 && sink > 0 && (sink * sink + lateral * lateral)
                     / (2 * Math.Max(0.1, free)) + sink * 2 >= Math.Max(0, clearance - config.Predictor.CaptureAltitude);
+            // Gleiten geht vor: solange die Stufe gleiten darf, zuendet sie nicht. Das Gleiten endet
+            // selbst rechtzeitig vor der geplanten Zuendung (GlideAllowed), und die Vorhersage plant
+            // die Drehung zurueck mit ein. Ein aussichtsloser Rueckwaerts-Plan hoch oben ist genau der
+            // Fall, in dem die Luft mehr bremsen kann als das Triebwerk (Flug vom 25.09.2026, 21:58:
+            // mit Steuerflaechen rueckwaerts Cd*A 0,7, Zuendung bei 24 km mit 2360 m/s, Tanks leer).
+            glideNow = !burning && !ordered && phase == DescentPhase.Entry
+                && GlideAllowed(state, Math.Sqrt(sink * sink + lateral * lateral));
+            // Und ueber der Luft, in der das Gleiten anfaengt, zuendet ein aussichtsloser Rueckwaerts-
+            // Plan auch nicht: dort oben bremst das Triebwerk am teuersten, und weiter unten wartet
+            // die Luft.
+            bool waitForAir = !glideNow && !burning && !ordered && phase == DescentPhase.Entry
+                && predictor != null && !glideEnded && config.Glide.AngleDegrees > 0
+                && prediction != null && prediction.Valid && (prediction.Unstoppable || prediction.UsedBestEffort)
+                && state.AirDensity < config.Glide.MinimumDensity && sink > 0
+                && clearance > config.Glide.MinimumClearance;
+            if (glideNow || waitForAir) { forecastDue = false; fallback = false; }
             bool needsIgnition = !ordered && !burning && (forecastDue || fallback);
             if (needsIgnition)
             {
@@ -316,7 +332,9 @@ namespace BoosterWatch.Guidance
                 double drag = state.DragValid ? Math.Max(0, state.DragAcceleration) : 0;
                 // Only the vertical component supports weight. Sideways drag is not lift.
                 double speed = Math.Sqrt(sink * sink + lateral * lateral);
-                drag *= speed > 1e-6 ? sink / speed : 0;
+                // Gemessener Abtrieb (Rumpf schief im Luftstrom) nimmt von dieser Stuetze wieder weg.
+                double lift = DescentPredictor.PlannedLiftRatio(state) * drag;
+                drag = speed > 1e-6 ? (drag * sink + lift * Math.Abs(lateral)) / speed : 0;
                 // A measurement, so it can be wrong. Crediting a booster with more drag than five
                 // times its own weight is never right, and the cost of believing it is the engines
                 // staying dark: the term is subtracted from gravity, so a bogus reading of a few
@@ -356,7 +374,7 @@ namespace BoosterWatch.Guidance
             // Rushing that is what turns an entry into a hundred-second burn 39 km up with the
             // propellant for the landing already gone.
             if (coasting) verticalCommand = 0;
-            verticalCommand = Clamp(verticalCommand, 0, thrustAcceleration * (1 - config.Predictor.ThrustReserve));
+            verticalCommand = Clamp(verticalCommand, 0, usable);
             output.DescentRateLimited = sink > target + 1 && free < 1;
 
             // Lateral: slow the drift down to the speed that is still allowed at contact. The
@@ -589,6 +607,85 @@ namespace BoosterWatch.Guidance
             output.Up = sink / speed;
             output.East = -state.VelocityEast / speed;
             output.North = -state.VelocityNorth / speed;
+            if (glideNow && phase == DescentPhase.Entry && !ordered) Glide(ref output, state, speed);
+        }
+        private bool glideNow;
+
+        // Gleiten nur im echten Sinkflug ohne Schub, in genug Luft, hoch genug und mit genug Abstand
+        // zur geplanten Zuendung. Die Probe-Laeufe der Vorhersage (predictor == null) gleiten nie.
+        private bool GlideAllowed(DescentState state, double speed)
+        {
+            DescentConfig.GlideSettings g = config.Glide;
+            if (g.AngleDegrees <= 0 || predictor == null || glideEnded) return false;
+            if (phase != DescentPhase.Entry || ordered || hasBurnCommand || aborted) return false;
+            if (!(state.AirDensity >= g.MinimumDensity) || speed < g.MinimumSpeed) return false;
+            // Only on a valid plan: an invalid or missing one is exactly when the fallback ignition
+            // can fire, and it must not find the booster 35 degrees off its engine axis.
+            DescentPrediction plan = LastPrediction;
+            if (plan == null || !plan.Valid) return false;
+            if (state.Clearance < g.MinimumClearance) { EndGlide("Mindesthoehe"); return false; }
+            bool gliding = !double.IsNaN(glideStart);
+            // Drueckt der Rumpf schon vor dem Gleiten nach unten (schief haengend, ohne Steuerflaechen),
+            // wird gar nicht erst geglitten: die Stufe kommt nicht in den Winkel.
+            if (!gliding && state.LiftKnown && RecoveryFinite(state.LiftRatio) && state.LiftRatio < g.MinimumLiftRatio)
+            { glideEnded = true; return false; }
+            // Noch nicht angefangen: nur mit Abstand zur Zuendung - oder wenn der Rueckwaerts-Plan
+            // ohnehin nicht aufgeht, denn dann ist die Luft die einzige Bremse, die noch reicht.
+            // Schon am Gleiten: der Plan rechnet das Zurueckdrehen mit ein und endet es rechtzeitig.
+            // Hoch oben immer: dort ist die Luft die billigste Bremse, und der erste Plan mit Gleiten
+            // entscheidet dann selbst, wann zurueckgedreht wird (Ziel: so wenig Treibstoff wie moeglich).
+            bool hopeless = plan.Unstoppable || plan.UsedBestEffort || state.Clearance >= g.StartClearance;
+            if (!(gliding || hopeless) && (plan.IgnitionNeeded || plan.IgnitionTime - state.Time <= g.IgnitionLeadSeconds))
+            { EndGlide("Zuendung naht"); return false; }
+            // Nur ein Plan, der schon mit dem Gleiten gerechnet wurde, darf es beenden; der erste nach
+            // dem Anfang ist noch der Rueckwaerts-Plan (die Vorhersage laeuft im Hintergrund).
+            // Und nur ein Plan, der aufgeht: haelt auch der Plan mit Gleiten die Landung fuer
+            // aussichtslos, bremst weiteres Gleiten immer noch umsonst, das Triebwerk nicht.
+            if (gliding && plan.PreBurnSeconds > 0 && !plan.Unstoppable && !plan.UsedBestEffort
+                && (plan.IgnitionNeeded || plan.IgnitionTime - state.Time <= g.IgnitionLeadSeconds))
+            { EndGlide("Zuendung naht"); return false; }
+            // Gleiten soll Auftrieb nach OBEN bringen. Liefert der Rumpf nach der Anlaufzeit keinen -
+            // die Stufe kommt ohne Steuerflaechen nicht in den Winkel und haengt irgendwo im Luftstrom -
+            // bringt das Gleiten nichts als Unsicherheit (Flug vom 25.09.2026: 45 Grad Lagefehler,
+            // Rumpf drueckte nach unten). Dann zurueck auf rueckwaerts.
+            if (double.IsNaN(glideStart)) glideStart = state.Time;
+            if (state.Time - glideStart >= g.LiftCheckSeconds && state.LiftKnown
+                && RecoveryFinite(state.LiftRatio) && state.LiftRatio < g.MinimumLiftRatio)
+            { glideFailed = true; EndGlide("kein Auftrieb (" + state.LiftRatio.ToString("0.00") + " x Widerstand)"); return false; }
+            return true;
+        }
+
+        private void EndGlide(string reason)
+        {
+            glideEnded = true;
+            if (!double.IsNaN(glideStart) && GlideEndReason.Length == 0) GlideEndReason = reason;
+        }
+        private static bool RecoveryFinite(double x) { return !double.IsNaN(x) && !double.IsInfinity(x); }
+
+        // Den Rueckwaerts-Kurs um den Anstellwinkel kippen. Die Achse (Triebwerk voraus) wird dabei
+        // unter die Flugbahn geneigt: dann liegt das vordere Ende hoeher als die Bahn - wie die Nase
+        // eines Flugzeugs - und der Auftrieb des Rumpfes zeigt nach oben. Bei fast senkrechtem Fall
+        // gibt es kein "oben" quer zur Bahn; dann zeigt der Auftrieb gegen die seitliche Drift.
+        private void Glide(ref GuidanceStep output, DescentState state, double speed)
+        {
+            double vu = -state.Sink / speed, ve = state.VelocityEast / speed, vn = state.VelocityNorth / speed;
+            // Lokales Oben (1,0,0) ohne seinen Anteil entlang der Bahn.
+            double lu = 1 - vu * vu, le = -vu * ve, ln = -vu * vn;
+            double length = Math.Sqrt(lu * lu + le * le + ln * ln);
+            if (length < 0.15)
+            {
+                double horizontal = Math.Sqrt(ve * ve + vn * vn);
+                if (horizontal > 1e-3) { lu = 0; le = -ve / horizontal; ln = -vn / horizontal; }
+                else { lu = 0; le = 1; ln = 0; }
+            }
+            else { lu /= length; le /= length; ln /= length; }
+            double a = config.Glide.AngleDegrees * Math.PI / 180;
+            double c = Math.Cos(a), s = Math.Sin(a);
+            output.Up = c * output.Up - s * lu;
+            output.East = c * output.East - s * le;
+            output.North = c * output.North - s * ln;
+            output.Gliding = true;
+            output.GlideDegrees = config.Glide.AngleDegrees;
         }
 
         // Burning: along the net acceleration command, expressed in the local horizon frame.
@@ -632,10 +729,10 @@ namespace BoosterWatch.Guidance
             switch (phase)
             {
                 case DescentPhase.Idle:
-                    // A booster that is still accelerating upwards with its upper stage is not a
-                    // descender yet, and one whose readings are younger than a few seconds belongs
-                    // to a vessel the game has only just created.
-                    if (time >= config.Control.MinimumFlightSeconds) phase = DescentPhase.Align;
+                    // One tick in Idle, then Align. (A "minimum flight seconds" gate used to sit here, but
+                    // it compared the universal time against 3 s and so never held anything in flight;
+                    // the young-vessel protection lives in TrackedBooster and DescentGate.)
+                    phase = DescentPhase.Align;
                     break;
                 case DescentPhase.Align:
                     if (aligned) phase = DescentPhase.Entry;

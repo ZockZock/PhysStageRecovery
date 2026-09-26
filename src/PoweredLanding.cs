@@ -9,9 +9,8 @@ namespace BoosterWatch
 {
     // Per-vessel KSP adapter. Guidance, throttle and attitude run on EVERY physics tick.
     //
-    // Two landing laws live here. `legacy` is the ported MechJeb state chain; `predictive` is the
-    // law in Guidance/, which forecasts the descent and flies a descent-rate profile. The switch is
-    // a setting so a flight that goes wrong can be repeated on the old path without a rebuild.
+    // The landing law lives in Guidance/: it forecasts the descent and flies a descent-rate profile.
+    // From the MechJeb port only the attitude controller is left (MJLandingContext / BetterController).
     public sealed class PoweredLanding
     {
         private readonly Vessel vessel;
@@ -22,6 +21,9 @@ namespace BoosterWatch
         private double lastSampleTime, bottomOffset;
         private readonly HashSet<ModuleEngines> controlledEngines = new HashSet<ModuleEngines>();
         private readonly Vector3d[] torquePositive = new Vector3d[4], torqueNegative = new Vector3d[4];
+        // Throttle that actually left the safety gate on the previous tick. A running burn keeps the
+        // wider 80-degree gate; an engine that is merely lit at zero throttle does not.
+        private float lastGatedThrottle;
         // The predictive path: the law, its bridge to the game, and the config they share.
         private DescentConfig descentConfig;
         private DescentAdapter adapter;
@@ -45,8 +47,7 @@ namespace BoosterWatch
         public string ThrottleCutReason = "";
         public Vector3d AvailableTorque { get; private set; }
         public Vector3 ControlInput { get; private set; }
-        public bool Predictive { get; private set; }
-        // Readings of the predictive law, for the landing check log line only.
+        // Readings of the landing law, for the log lines and the window.
         public DescentPhase Phase { get { return descent == null ? DescentPhase.Idle : descent.Phase; } }
         public DescentPrediction Prediction { get { return descent == null ? null : descent.LastPrediction; } }
         public double TargetSink { get; private set; }
@@ -55,11 +56,6 @@ namespace BoosterWatch
         public double AvailableDeltaV { get { return adapter == null ? double.NaN : adapter.AvailableDeltaV; } }
         public double DragCoefficient { get { return adapter == null ? double.NaN : adapter.VesselDragCoefficient; } }
         public bool Unstoppable { get; private set; }
-        // Terrain readings of the guidance, for the landing check log line only.
-        public double EndAltitude { get { return core == null ? double.NaN : core.Landing.LastEndAltitude; } }
-        public double LegacyDragCoefficient { get { return core == null ? double.NaN : core.Landing.LastDragCoefficient; } }
-        public bool UsesAtmosphere { get { return core != null && core.Landing.LastUseAtmosphere; } }
-        public bool BrakingEnvelopeTriggered { get { return core != null && core.Landing.BrakingEnvelopeTriggered; } }
         public double AvailableAcceleration { get { return core == null ? double.NaN : core.VesselState.LimitedMaxThrustAcceleration; } }
         // The acceleration the engines really deliver, as opposed to AvailableAcceleration (what they
         // could deliver). A booster that spends five seconds at 78 % throttle and loses only 25 m/s is
@@ -67,7 +63,7 @@ namespace BoosterWatch
         // that in the log otherwise.
         public double ActualAcceleration { get; private set; }
         // The guidance is flying its final descent right now.
-        public bool InFinalDescent { get { return core != null && core.Landing.InFinalDescent; } }
+        public bool InFinalDescent { get { return connected && (Phase == DescentPhase.Terminal || Phase == DescentPhase.Touchdown); } }
         public bool RecoveryReady { get; private set; }
         public bool OwnsControl { get { return connected; } }
         public PoweredLanding(Vessel v) { vessel = v; }
@@ -109,7 +105,7 @@ namespace BoosterWatch
             LandingSystems.SetRcs(vessel, true);
             connected = true; StopReason = "";
             vessel.OnFlyByWire += Control;
-            Debug.Log("[PhysStageRecovery] Standalone MechJeb source landing started: " + vessel.id);
+            Debug.Log("[PhysStageRecovery] Landeautomat verbunden: " + vessel.id);
         }
         private bool CanControl()
         {
@@ -132,8 +128,7 @@ namespace BoosterWatch
                 v.Forward = vessel.ReferenceTransform.up; v.SurfaceVelocity = vessel.srf_velocity;
                 v.OrbitalVelocity = vessel.obt_velocity;
                 v.LocalGravity = vessel.mainBody.gravParameter / (v.CoM - vessel.mainBody.position).sqrMagnitude;
-                v.GravityForce = -v.Up * v.LocalGravity; v.AltitudeASL = vessel.altitude;
-                v.AltitudeTrue = v.AltitudeASL - vessel.mainBody.TerrainAltitude(v.CoM);
+                v.AltitudeTrue = vessel.altitude - vessel.mainBody.TerrainAltitude(v.CoM);
                 v.AltitudeBottom = v.AltitudeTrue + bottomOffset; v.DeltaT = TimeWarp.fixedDeltaTime;
                 if (v.DeltaT <= 0 || !RecoveryPolicy.Finite(v.AltitudeBottom)) { s.mainThrottle = 0; return; }
                 List<ModuleEngines> all = vessel.parts.SelectMany(p => p.FindModulesImplementing<ModuleEngines>()).ToList();
@@ -152,14 +147,9 @@ namespace BoosterWatch
                     if (RecoveryPolicy.Finite(thrust)) v.ThrustAvailable += Math.Max(0, thrust);
                 }
                 if (unsupported) v.ThrustAvailable = 0;
-                v.MaxThrustAcceleration = v.LimitedMaxThrustAcceleration = v.ThrustAvailable / Math.Max(0.001, vessel.GetTotalMass());
-                UpdateTorque(v); core.Landing.TouchdownSpeed = settings.LandingSpeed;
-                Predictive = settings.GuidanceMode == GuidanceMode.Predictive;
-                if (Predictive) DrivePredictive(s, v, engines, unsupported);
-                else
-                {
-                    core.Landing.Drive(s); core.Thrust.Drive(s); core.Attitude.Drive(s);
-                }
+                v.LimitedMaxThrustAcceleration = v.ThrustAvailable / Math.Max(0.001, vessel.GetTotalMass());
+                UpdateTorque(v);
+                DrivePredictive(s, v, engines, unsupported);
                 ActualTiltDegrees = Vector3d.Angle(v.Forward, v.Up);
                 AvailableTorque = v.TorqueAvailable;
                 ControlInput = new Vector3(s.pitch, s.roll, s.yaw);
@@ -170,8 +160,10 @@ namespace BoosterWatch
                 // it to; past 80 degrees the thrust works against the command, which is what drove a
                 // booster into the ground when its attitude error sat at 100 degrees and the throttle
                 // stayed at 100 %.
-                bool burning = false;
-                foreach (ModuleEngines e in engines) if (e.EngineIgnited) { burning = true; break; }
+                // "Burning" means thrust actually left this gate last tick - not merely a lit engine:
+                // engines are ignited at zero throttle as soon as a burn is ordered (below), and that
+                // alone must not open the wide gate for a booster that is still 70 degrees off.
+                bool burning = lastGatedThrottle > 0;
                 ThrottleCutReason = "";
                 if (unsupported || engines.Count == 0 || core.Attitude.attitudeError > (burning ? 80 : 45)
                     || !RecoveryPolicy.Finite(s.mainThrottle))
@@ -186,6 +178,7 @@ namespace BoosterWatch
                             + (burning ? 80 : 45);
                     s.mainThrottle = 0;
                 }
+                lastGatedThrottle = s.mainThrottle;
                 // Arm the engines as soon as the law has ordered a burn - and not only when the
                 // throttle survives the safety gate below. KSP keeps an engine that was never
                 // ignited dark whatever throttle is asked of it, so a booster whose attitude was off
@@ -193,8 +186,7 @@ namespace BoosterWatch
                 // throttle, the engines showed no plume, and there was no thrust to land on. An
                 // engine ignited at zero throttle makes no thrust and burns nothing, so lighting it
                 // early costs nothing and removes the whole failure mode.
-                bool burnOrdered = Predictive
-                    && (Phase == DescentPhase.Burn || Phase == DescentPhase.Terminal
+                bool burnOrdered = (Phase == DescentPhase.Burn || Phase == DescentPhase.Terminal
                         || Phase == DescentPhase.Touchdown);
                 foreach (ModuleEngines e in engines)
                 {
@@ -234,7 +226,7 @@ namespace BoosterWatch
                 }
                 DeploySystems(v); vessel.ActionGroups.SetGroup(KSPActionGroup.SAS, false);
                 TiltDegrees = core.Attitude.Tilt;
-                Status = (Predictive ? PredictiveStatus(s) : core.Landing.Status)
+                if (!earlyStatus) Status = PredictiveStatus(s)
                     + (unsupported ? " - ungeeignetes Triebwerk" :
                     engines.Count == 0 ? " - kein nutzbarer Treibstoff/Schub" : " - Schub " + (100 * s.mainThrottle).ToString("0") + "%");
             }
@@ -247,9 +239,12 @@ namespace BoosterWatch
         }
         // One tick of the predictive law. The adapter gathers what KSP knows, the law decides, and
         // the answer is written back into the FlightCtrlState the game is about to apply.
+        private string loggedGlideEnd = "";
+        private readonly FuelTrim trim = new FuelTrim();
         private void DrivePredictive(FlightCtrlState s, MechJebPort.VesselState state,
             List<ModuleEngines> engines, bool unsupported)
         {
+            earlyStatus = false;
             if (descentConfig == null)
             {
                 descentConfig = DescentConfig.Default();
@@ -271,11 +266,16 @@ namespace BoosterWatch
             {
                 s.mainThrottle = 0;
                 Status = "Landung: " + (note.Length > 0 ? note : "kein Triebwerk");
+                // No engine to land with: leave the attitude free (canopies may be flying it).
+                earlyStatus = true;
                 return;
             }
             double clearance = state.AltitudeBottom;
             double trackedSlope = hasTrackedSample ? trackedSample.SlopeDegrees : double.NaN;
-            DescentState descentState = adapter.Build(vessel, clearance, now, bottomOffset, trackedSlope);
+            double hullDepth = hasTrackedSample && RecoveryPolicy.Finite(trackedSample.HullDepth)
+                ? trackedSample.HullDepth : Math.Max(0, -bottomOffset);
+            bool gliding = (descent.LastStep.HasValue && descent.LastStep.Value.Gliding) || descent.Steerable;
+            DescentState descentState = adapter.Build(vessel, clearance, now, hullDepth, trackedSlope, gliding);
             // "Aligned" is the gate that lets the guidance leave its startup phase, so it has to ask
             // the right question: is the booster holding the attitude the law is asking for? Asking
             // instead whether it points retrograde or upright looks equivalent and is not - the two
@@ -288,14 +288,26 @@ namespace BoosterWatch
             // KSP works in everywhere else. The conversion belongs here, at the one place the two
             // meet, so the forecast's drag, its mass flow and the tests' harness all agree.
             GuidanceStep step = descent.Step(descentState, 1000 * adapter.Mass, TimeWarp.fixedDeltaTime, aligned);
+            // Waehrend des Gleitens den Treibstoff vom Triebwerk weg pumpen (FuelTrim).
+            if (step.Valid && step.Gliding && descentConfig.Glide.PumpFuel)
+                trim.Pump(vessel, usable.Count > 0 ? usable : engines, TimeWarp.fixedDeltaTime, vessel.id.ToString());
+            if (descent.GlideEndReason != loggedGlideEnd)
+            {
+                loggedGlideEnd = descent.GlideEndReason;
+                if (loggedGlideEnd.Length > 0)
+                    Debug.Log("[PhysStageRecovery] Gleiten beendet " + vessel.id + ": " + loggedGlideEnd
+                        + " bei " + clearance.ToString("0") + " m, Anstellwinkel "
+                        + adapter.AngleOfAttack.ToString("0.0") + " Grad.");
+            }
             if (!step.Valid)
             {
                 s.mainThrottle = 0;
                 Status = "Landung: Messwerte ungueltig";
+                HoldUpright(s, state);
                 return;
             }
             if (recorder == null)
-                recorder = new FlightRecorder(vessel.id.ToString(), DateTime.Now.ToString("MMdd-HHmm"));
+                recorder = new FlightRecorder(vessel.id.ToString(), DateTime.Now.ToString("yyyyMMdd-HHmmss"));
             Record(step, descentState, clearance, engines);
             TargetSink = step.TargetSink;
             FreeAcceleration = step.FreeAcceleration;
@@ -318,6 +330,18 @@ namespace BoosterWatch
             core.Attitude.attitudeTo(axis, AttitudeReference.INERTIAL, descent);
             core.Attitude.Drive(s);
             s.mainThrottle = (float)step.Throttle;
+        }
+
+        // Early exits of DrivePredictive: keep their status line (the caller would overwrite it) and
+        // keep flying the attitude - SAS is forced off while the automat owns the booster, so without
+        // this the booster would tumble freely until the law has usable readings again.
+        private bool earlyStatus;
+        private void HoldUpright(FlightCtrlState s, MechJebPort.VesselState state)
+        {
+            earlyStatus = true;
+            core.Attitude.attitudeTo(state.SurfaceVelocity.sqrMagnitude > 4 ? -state.SurfaceVelocity : state.Up,
+                AttitudeReference.INERTIAL, this);
+            core.Attitude.Drive(s);
         }
 
         // Everything the law saw and everything it decided, once per tick, into the flight file.
@@ -356,7 +380,7 @@ namespace BoosterWatch
                     if (e.flameout) flameout = true;
                 }
                 bool interesting = step.IgnitionDue || step.Phase == DescentPhase.Burn
-                    && recorder.Rows > 0 && clearance < LowAltitudeForRecord;
+                    && recorder.Taken > 0 && clearance < LowAltitudeForRecord;
                 recorder.Sample(Planetarium.GetUniversalTime(), interesting,
                     FlightRecorder.Row(
                         Planetarium.GetUniversalTime(), TimeWarp.fixedDeltaTime,
@@ -398,14 +422,12 @@ namespace BoosterWatch
         // propellant it costs.
         private void ApplySettings(DescentConfig config)
         {
-            config.Terminal.TouchdownSpeed = Math.Max(0.5, settings.TouchdownSpeed);
+            config.Terminal.TouchdownSpeed = Math.Max(0.5, settings.LandingSpeed);
             config.Terminal.Altitude = Math.Max(1, settings.TerminalAltitude);
             config.Predictor.CaptureAltitude = Math.Max(10, Math.Min(5000, settings.CaptureAltitude));
             config.Terminal.MaxTiltDegrees = settings.TiltLimit;
             config.Terminal.HighAltitudeTiltDegrees = Math.Min(60, settings.TiltLimit * 2);
             config.Predictor.ThrustReserve = settings.ThrustReserve;
-            // The forecast aims for the same speed the profile is anchored at, never above it.
-            config.Predictor.TargetTouchdownSpeed = config.Terminal.TouchdownSpeed;
         }
 
         // One line with every number the predictive law decided on, so a flight can be read back
@@ -413,12 +435,22 @@ namespace BoosterWatch
         // metres and once every five above that, next to the existing Landing check line.
         public string PredictLine(double clearance, double sink, double lateral, double angular)
         {
-            if (descent == null || !Predictive) return null;
+            if (descent == null || !connected) return null;
             DescentPrediction prediction = descent.LastPrediction;
             System.Text.StringBuilder text = new System.Text.StringBuilder();
             text.Append("[PhysStageRecovery] Landing predict ").Append(vessel.id);
             text.Append(" state=").Append(DescentPhases.Name(descent.Phase));
             if (descent.LastStep.HasValue && descent.LastStep.Value.Coasting) text.Append(" (Coast: Luft bremst)");
+            if (descent.LastStep.HasValue && descent.LastStep.Value.Gliding)
+                text.Append(" gleiten=").Append(Number(descent.LastStep.Value.GlideDegrees, "deg"));
+            if (adapter != null)
+            {
+                text.Append(" anstellwinkel=").Append(Number(adapter.AngleOfAttack, "deg"));
+                text.Append(" cdaRueck=").Append(Number(adapter.AxialDragCoefficient, ""));
+                text.Append(" cda=").Append(Number(adapter.VesselDragCoefficient, ""));
+                text.Append(" cdaRetro=").Append(Number(adapter.RetroDragCoefficient, ""));
+                text.Append(" auftrieb=").Append(adapter.LiftKnown ? adapter.LiftRatio.ToString("0.00") + "xW" : "--");
+            }
             text.Append(" clearance=").Append(Number(clearance, "m"));
             text.Append(" slope=").Append(Number(adapter == null ? double.NaN : adapter.SlopeDegrees, "deg"));
             if (adapter != null && adapter.LookingAhead)
@@ -429,10 +461,6 @@ namespace BoosterWatch
             text.Append(" drag=").Append(Number(descent.LastStep.HasValue
                 ? descent.LastStep.Value.CoastDrag : double.NaN, "m/s2"));
             text.Append(" rho=").Append(Number(adapter == null ? double.NaN : adapter.DensityScale, "x"));
-            // The coast's own decision, which is what an entry has to be read from: the engines stay
-            // dark while the whole flown speed is inside the budget the remaining height can pay for.
-            if (descent.LastStep.HasValue && descent.LastStep.Value.CoastBudget > 0)
-                text.Append(" coastBudget=").Append(Number(descent.LastStep.Value.CoastBudget, "m/s"));
             text.Append(" zielSink=").Append(Number(TargetSink, "m/s"));
             if (descent.LastStep.HasValue)
             {
@@ -475,27 +503,6 @@ namespace BoosterWatch
             return text.ToString();
         }
 
-        // One short line for the flight window: what the landing law currently expects to happen.
-        // The reserve is the number to watch - it goes negative before something goes wrong - and
-        // the predicted touchdown speed is what the booster would arrive with if the burn started
-        // right now.
-        public string LandingSummary()
-        {
-            if (descent == null || !Predictive) return null;
-            DescentPrediction prediction = descent.LastPrediction;
-            System.Text.StringBuilder text = new System.Text.StringBuilder();
-            text.Append(DescentPhases.Name(descent.Phase));
-            text.Append(" · Ziel ").Append(TargetSink.ToString("0.0")).Append(" m/s");
-            if (prediction != null && prediction.Valid)
-            {
-                text.Append(" · voraussichtlich ").Append(prediction.TouchdownSpeed.ToString("0.0")).Append(" m/s");
-                text.Append(" · Reserve ").Append(prediction.SpeedMargin.ToString("+0.0;-0.0;0.0")).Append(" m/s");
-            }
-            text.Append(" · Schub ").Append((100 * CommandedThrottle).ToString("0")).Append(" %");
-            if (Unstoppable) text.Append(" · nicht mehr abfangbar");
-            return text.ToString();
-        }
-
         private double LastCutoff
         {
             get
@@ -522,7 +529,7 @@ namespace BoosterWatch
 
         private void UpdateTorque(MechJebPort.VesselState state)
         {
-            state.TorqueAvailable = Vector3d.zero; state.TorqueGimbal.Positive = Vector3d.zero;
+            state.TorqueAvailable = Vector3d.zero;
             Array.Clear(torquePositive, 0, 4); Array.Clear(torqueNegative, 0, 4);
             Vector3d rcsPositive = Vector3d.zero, rcsNegative = Vector3d.zero;
             foreach (Part part in vessel.parts)
@@ -571,7 +578,6 @@ namespace BoosterWatch
                 }
             state.TorqueAvailable += Vector3d.Max(rcsPositive, rcsNegative);
             for (int group = 0; group < 4; group++) state.TorqueAvailable += Vector3d.Max(torquePositive[group], torqueNegative[group]);
-            state.TorqueGimbal.Positive = torquePositive[2];
         }
         private void DeploySystems(MechJebPort.VesselState state)
         {
@@ -585,7 +591,7 @@ namespace BoosterWatch
                 ParachuteDeployment.TryArm(chute, settings.AutoArm, vessel.verticalSpeed < 0, vessel.terrainAltitude, out reason);
             }
         }
-        public void Stop(string reason = null, bool keepThrust = false)
+        public void Stop(string reason = null)
         {
             if (descent != null) descent.CancelPrediction();
             if (reason != null) StopReason = reason;
@@ -593,6 +599,8 @@ namespace BoosterWatch
             // No live guidance readings while the controller is detached; a stale tilt or throttle
             // must not look like a current command in the log.
             AttitudeError = double.NaN; CommandedThrottle = double.NaN;
+            // A new connection must not start from the aim or the gate state of the old one.
+            aimValid = false; lastGatedThrottle = 0;
             if (!connected) return;
             connected = false;
             if (vessel == null) return;

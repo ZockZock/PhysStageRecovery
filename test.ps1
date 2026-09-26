@@ -35,6 +35,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Tracking acceptance test compilation failed.' 
 & $acceptExe
 if ($LASTEXITCODE -ne 0) { throw 'Tracking acceptance tests failed.' }
 $harmony = Join-Path $KspDir 'GameData\000_Harmony\0Harmony.dll'
+# Die Bodenspur als Gegenprobe zu KSPs Geschwindigkeitsanzeige: Fenster, Datumsgrenze, Ausreisser.
+# Reine Arithmetik, kein KSP.
+$trackExe = Join-Path $testDir 'GroundTrackTests.exe'
+& $compiler /nologo /target:exe ('/out:' + $trackExe) (Join-Path $PSScriptRoot 'src\RecoveryPolicy.cs') (Join-Path $PSScriptRoot 'src\GroundTrack.cs') (Join-Path $PSScriptRoot 'tests\GroundTrackTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Ground track test compilation failed.' }
+& $trackExe
+if ($LASTEXITCODE -ne 0) { throw 'Ground track tests failed.' }
 # Der eigene Boden unter fernen Boostern: wann er gebaut wird und welche Form sein Netz hat.
 # Reine Arithmetik, kein KSP.
 $patchExe = Join-Path $testDir 'GroundPatchPolicyTests.exe'
@@ -65,15 +72,33 @@ if ($LASTEXITCODE -ne 0) { throw 'Settings test compilation failed.' }
 & $settingsExe $managed (Join-Path $testDir 'settings-tests')
 if ($LASTEXITCODE -ne 0) { throw 'Settings and range tests failed.' }
 
+# Die Bergungsentscheidung der Triebwerkslandung beim Abschalten in Schnitthoehe. Reine Logik.
+$cutoffExe = Join-Path $testDir 'CutoffPolicyTests.exe'
+& $compiler /nologo /target:exe ('/out:' + $cutoffExe) (Join-Path $PSScriptRoot 'src\CutoffPolicy.cs') (Join-Path $PSScriptRoot 'src\TouchdownPolicy.cs') (Join-Path $PSScriptRoot 'src\RecoveryPolicy.cs') (Join-Path $PSScriptRoot 'tests\CutoffPolicyTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Cutoff tests did not compile.' }
+& $cutoffExe
+if ($LASTEXITCODE -ne 0) { throw 'Cutoff tests failed.' }
+# Steuerflaechen im Rueckwaertsflug umkehren. Reine Logik.
+$surfaceExe = Join-Path $testDir 'ControlSurfacePolicyTests.exe'
+& $compiler /nologo /target:exe ('/out:' + $surfaceExe) (Join-Path $PSScriptRoot 'src\ControlSurfacePolicy.cs') (Join-Path $PSScriptRoot 'tests\ControlSurfacePolicyTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Control surface tests did not compile.' }
+& $surfaceExe
+if ($LASTEXITCODE -ne 0) { throw 'Control surface tests failed.' }
+# Rumpfauftrieb aus der gemessenen Beschleunigung. Reine Arithmetik.
+$liftExe = Join-Path $testDir 'LiftPolicyTests.exe'
+& $compiler /nologo /target:exe ('/out:' + $liftExe) (Join-Path $PSScriptRoot 'src\LiftPolicy.cs') (Join-Path $PSScriptRoot 'tests\LiftPolicyTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Lift tests did not compile.' }
+& $liftExe
+if ($LASTEXITCODE -ne 0) { throw 'Lift tests failed.' }
+
 $touchdownExe = Join-Path $testDir 'TouchdownTests.exe'
 & $compiler /nologo /target:exe ('/out:' + $touchdownExe) (Join-Path $PSScriptRoot 'src\RecoveryPolicy.cs') (Join-Path $PSScriptRoot 'src\TouchdownPolicy.cs') (Join-Path $PSScriptRoot 'tests\TouchdownTests.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Touchdown tests did not compile.' }
 & $touchdownExe
 if ($LASTEXITCODE -ne 0) { throw 'Touchdown tests failed.' }
 
-# The predictive landing law is plain arithmetic: the whole approach flies against a closed-form
-# model here, with no KSP and no Unity. It runs before the source-port suite so that a failure
-# there cannot hide the results of the new law.
+# The landing law is plain arithmetic: the whole approach flies against a closed-form model here,
+# with no KSP and no Unity.
 #
 # The one thing it borrows from the game is Vector3d, because the law works in KSP's world
 # coordinates and a private copy of that type would mean the tests exercise a different arithmetic
@@ -93,20 +118,6 @@ if ($LASTEXITCODE -ne 0) { throw 'Guidance tests did not compile.' }
 $env:PATH = $managed + ';' + $env:PATH
 & $guidanceExe $managed
 if ($LASTEXITCODE -ne 0) { throw 'Guidance tests failed.' }
-
-$portExe = Join-Path $testDir 'LandingPortTests.exe'
-$portArgs = @('/nologo','/target:exe','/nowarn:0436,0649',('/out:' + $portExe))
-foreach ($ref in @('Assembly-CSharp','Assembly-CSharp-firstpass','UnityEngine','UnityEngine.CoreModule')) {
-    $portArgs += '/reference:' + (Join-Path $managed ($ref + '.dll'))
-}
-foreach ($file in @('src/GroundSurface.cs','src/BrakingEnvelope.cs','src/MJFinalDescent.cs','src/MJUntargetedDeorbit.cs','src/MJCoastToDeceleration.cs',
-    'src/MJDecelerationBurn.cs','src/MJKillHorizontalVelocity.cs','src/MJGravityTurn.cs','src/ApproachDescentSpeedPolicy.cs','src/MJThrustDrive.cs',
-    'src/MJPIDController.cs','src/MJPIDLoop2.cs','src/MJDirectionTracker.cs','src/MJMathExtensions.cs','src/MJPortMath.cs','src/MJBetterController.cs',
-    'tests/LandingPortHarness.cs','tests/LandingPortTests.cs')) { $portArgs += Join-Path $PSScriptRoot $file }
-& $compiler @portArgs
-if ($LASTEXITCODE -ne 0) { throw 'Landing source-port tests did not compile.' }
-& $portExe $managed
-if ($LASTEXITCODE -ne 0) { throw 'Landing source-port tests failed.' }
 
 $windowExe = Join-Path $testDir 'WindowOpenPolicyTests.exe'
 & $compiler /nologo /target:exe ('/out:' + $windowExe) (Join-Path $PSScriptRoot 'src/WindowOpenPolicy.cs') (Join-Path $PSScriptRoot 'tests/WindowOpenPolicyTests.cs')

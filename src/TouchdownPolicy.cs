@@ -37,10 +37,10 @@ namespace BoosterWatch
                 ? TouchdownOutcome.Safe : TouchdownOutcome.Unconfirmed;
         }
 
-        // A real touchdown counts as recovered immediately. Every "not too fast" limit is already
-        // part of the contact classification above: sink, sideways speed, rotation, total speed,
-        // being buried, damaged or having lost parts all turn the contact into a crash. There is
-        // deliberately no resting time.
+        // A real touchdown counts as recovered immediately, with no resting time. The classification
+        // above turns sink rate, rotation, burial and damage into a crash; sideways speed does not
+        // count (see Evaluate), and a contact without usable evidence (Unconfirmed) is recovered too.
+        // Powered landings are judged earlier, at engine cutoff (CutoffPolicy).
         public static bool RecoveredOnContact(bool landed, TouchdownOutcome outcome)
         {
             return landed && outcome != TouchdownOutcome.Crashed;

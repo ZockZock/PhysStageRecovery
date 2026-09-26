@@ -35,21 +35,5 @@ namespace BoosterWatch
             return true;
         }
 
-        // The largest ratio of any one propellant a set of engines is burning, which is what turns
-        // "how much is in the tanks" into "how long can these engines run".
-        public static double HighestRatio(ModuleEngines engine)
-        {
-            double ratio = 0;
-            foreach (Propellant propellant in engine.propellants)
-                if (propellant.ratio > ratio) ratio = propellant.ratio;
-            return ratio;
-        }
-
-        // Number of usable engines, for the status line.
-        public static int Count(Vessel vessel)
-        {
-            if (vessel == null || vessel.parts == null) return 0;
-            return vessel.parts.Sum(part => part.FindModulesImplementing<ModuleEngines>().Count(Suitable));
-        }
     }
 }

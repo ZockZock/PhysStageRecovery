@@ -1,8 +1,136 @@
-# PhysStageRecovery 0.9.38 — KSP 1.12.5
+# PhysStageRecovery 0.9.48 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
-**MechJeb muss weder installiert noch als Bauteil am Booster vorhanden sein.** Die benötigten Algorithmen sind im eigenen Plugin enthalten. Erforderlich ist weiterhin Harmony 2 unter `GameData/000_Harmony/0Harmony.dll`.
+**MechJeb muss weder installiert noch als Bauteil am Booster vorhanden sein.** Von MechJeb übernommen ist nur noch die Lageregelung (`BetterController`); sie ist im eigenen Plugin enthalten. Erforderlich ist weiterhin Harmony 2 unter `GameData/000_Harmony/0Harmony.dll`.
+
+## 0.9.48: Zeitraffer bis 30 s vor dem Eintritt
+
+* Der normale Zeitraffer bleibt voll frei bis 30 s Spielzeit vor dem ersten Eintritt (vorher 60 s mit Bremsen ab 8 echten Sekunden davor). Begrenzt wird nur noch in den letzten ~1,5 echten Sekunden, damit ein Bild bei hohem Zeitraffer die Marke nicht überspringt. Danach Physikwarp bis 4x.
+
+## 0.9.47: Zeitraffer bis zum Wiedereintritt
+
+* **Normaler Zeitraffer über der Atmosphäre** (`src/WarpWindow.cs`, `BoosterWatchFlight.TrackingPhysics`): Solange alle verfolgten Booster über der Atmosphäre auf ihrer Bahn fliegen, ist der normale Zeitraffer frei. Im Vakuum rechnet KSP sie auf Schienen genau weiter. Der Mod rechnet aus der Bahn jedes Boosters die Zeit bis zum Eintritt. Die Zeitrafferstufe wird so begrenzt, dass bis zum Eintritt mindestens 8 echte Sekunden bleiben (Hinweis „Zeitraffer gebremst …“). 60 s Spielzeit vor dem Eintritt steht die Zeit wieder auf 1x, die Booster haben Physik und richten sich aus. In der Luft gilt wie bisher nur der Physikwarp (bis 4x), während einer Triebwerkslandung gar keiner.
+
+## 0.9.46: Schirme erst kurz vorher scharf
+
+Die Schirmhöhe aus dem Menü soll das Timing der Landung bestimmen. Bisher wurden die Schirme scharf geschaltet, sobald der Sinkflug bestätigt war. KSP öffnet einen scharfen Schirm dann gleich halb. Im Flug vom 25.09.2026, 23:10 war er ab 9,4 km halb offen und hielt den Booster mit ~130 m/s bis 1,1 km, erst dort ging er ganz auf. Das war rund eine Minute länger in der Luft.
+
+* Jetzt werden die Schirme erst **6 s Flugzeit vor der Öffnungshöhe** scharf, auch solche, die durch die Stufung scharf wurden (`ParachuteDeployment.ArmingHeight`, Wächter in `BoosterWatchFlight.BlockParachuteOpening`). Bis dahin fällt der Booster frei. Log: „Chute closed … wartet bis … m über Grund“.
+* Die Öffnungshöhe ist unverändert: genau der eingestellte Wert, außer der Booster ist dafür zu schnell (dann `Fahrt·1,5 + Fahrt²/800 + 200 m`, höchstens 5 km).
+* Die Zeit am offenen Schirm hängt fast nur noch von dieser Höhe ab: Bei ~6 m/s Sinkrate sind 1100 m rund 3 Minuten, 500 m etwa 1½ Minuten.
+
+## 0.9.45: Sanft aufrichten
+
+Flug vom 25.09.2026, 23:09. Die Stufe setzte mit 2,5 m/s ab, rutschte aber mit 6,2 m/s seitlich (Grenze 3 m/s). Verbrauch 2,6 t, der Trimmtank pumpte 3,2 t.
+
+* **Ursache:** Die Seitenfrist aus 0.9.44 (~45 m) verlangte kurz vor Ablauf die größte Schräglage: 28° bei 52 m für die letzten 4,7 m/s. Danach war aufrecht befohlen. Die Stufe brauchte 1,5 s zum Aufrichten (25° Lagefehler) und schob sich dabei mit 10 m/s in die Gegenrichtung.
+* **Änderung** (`src/CaptureBraking.cs`): Einen Rest unter 5 m/s nimmt der Mod jetzt nie schärfer als über 3 s heraus, das sind nur wenige Grad Schräglage. Bei großer Seitenfahrt bleibt die Frist hart.
+* **Testrahmen:** Die Lage der Stufe folgt dem Befehl jetzt nur mit begrenzter Drehrate (`TurnRateDegrees`). Damit zeigt sich das Überschießen auch im Nachbau: mit 0.9.44 3,6–4,5 m/s Gegenfahrt, jetzt ≤ 0,4.
+* **Fallschirmhöhe:** Die Einstellung gilt weiter, als „spätestens“. Fällt ein Booster schneller als ~250 m/s, öffnet der Schirm höher (seit 0.9.41). Hilfetext und Hinweis sagen das jetzt.
+
+## 0.9.44: Seitenfahrt früher weg
+
+Flug vom 25.09.2026, 22:53: Trimmtank (6,4 t, Schwerpunkt ~1,7 m) und Gleiten haben voll gewirkt. Die Stufe glitt von 45 km bis 2 km, stieg zwischendurch sogar wieder (Stein auf dem Wasser) und brauchte für die Landung nur 2,9 t Treibstoff (vorher 12–16 t). Aufgesetzt hat sie mit 3,8 m/s, aber mit 4,4 m/s seitlich. Die Bergungsgrenze liegt bei 3 m/s.
+
+* **Ursache:** Mit der Zielhöhe 10 m (Einstellung) nahm das Bremsen die Seitenfahrt erst bis 10 m heraus. Bis 14 m hing die Stufe 15° schräg (bei 100 m noch 20 m/s seitlich). Darunter war „aufrecht“ befohlen, die Stufe brauchte bei 20 % Schub zwei Sekunden dafür und schob sich dabei mit 4,4 m/s in die Gegenrichtung.
+* **Änderung** (`src/CaptureBraking.cs`): Die Seitenfahrt hat jetzt eine eigene Frist, 25 m über der Aufricht-Höhe (also ~45 m), unabhängig von der Zielhöhe. Darunter nimmt der Mod den Rest nur noch sanft heraus (über ~3 s, höchstens ~5° Schräglage). Im Nachbau: 1,8 m/s seitlich bei 45 m statt 7,9.
+
+## 0.9.43: Trimmtank und echter Rückwärts-Widerstand
+
+Flüge vom 25.09.2026, 22:28 und 22:35. Die Fallschirm-Booster wurden beide Male geborgen. Die Kernstufe landete beim ersten Flug (12,3 t Treibstoff verbraucht) und stürzte beim zweiten mit 95 m/s ab.
+
+* **Rückwärts-Widerstand aus KSPs Widerstandswürfeln** (`src/DescentAdapter.cs`): Beim Absturz plante die Vorhersage die Zündung mit Cd·A 2,2. Gemessen war der Wert bei „höchstens 3°“ Anstellwinkel, bei einem langen Rohr kommen aber pro Grad ~0,7 dazu. Genau rückwärts unter Schub waren es 0,8. Die Stufe zündete deshalb bei 9 km zu spät. Jetzt rechnet der Mod den Rückwärts-Wert jeden Schritt direkt aus den Widerstandswürfeln aus, wie KSP selbst, nur mit der Rückwärts-Richtung (Log: `cdaRetro=`). Hat die Stufe erfolgreich geglitten, lässt sie sich steuern, und die Zündung wird mit genau diesem Wert geplant.
+* **Trimmtank** (`src/FuelTrim.cs`): Beim Gleiten waren alle Steuerflächen am Anschlag, erreicht wurden 10–14° statt 35°. KSP leert einen Tankstapel von oben, der Rest liegt also am Triebwerk, und rückwärts fliegend richtet das die Stufe stark aus. Während des Gleitens pumpt der Mod den Treibstoff jetzt mit 1,5 t/s in den Tank, der am weitesten vom Triebwerk weg liegt. Der Schwerpunkt wandert zu den Flächen, die Luft hält weniger dagegen. Log: „Trimmtank …“.
+
+## 0.9.42: Gleiten statt Brennen
+
+Ziel: so wenig Treibstoff wie möglich für die Landung. Auswertung des Fluges vom 25.09.2026, 21:53:
+
+* **Kernstufe mit Steuerflächen:** Sie kam aus 242 km taumelnd (73°/s) herunter und stand erst bei 32 km ruhig rückwärts. Rückwärts bremst sie kaum (Cd·A 0,7). Die Vorhersage zündete deshalb bei 24 km mit 2360 m/s, leerte die Tanks und die Stufe schlug mit 194 m/s auf. Geglitten wurde nie: Das Gleiten verlangte einen gemessenen Rückwärts-Wert, und den gab es bei einer taumelnden Stufe nicht.
+* **Gleiten geht vor Zünden** (`src/DescentGuidance.cs`): Oberhalb von 12 km gleitet die Stufe jetzt immer, wenn sie kann, auch wenn der Rückwärts-Plan eine baldige Zündung verlangt. Darunter gleitet sie, solange die Zündung nicht naht oder der Rückwärts-Plan ohnehin nicht aufgeht. Solange sie gleitet, wird nicht gezündet. Über der Luft zündet ein aussichtsloser Plan nicht mehr, dort bremst das Triebwerk am teuersten.
+* **Vorhersage mit Gleiten** (`src/DescentPrediction.cs`): Bis zum Ende des Gleitens rechnet sie mit dem gemessenen Gleit-Widerstand und dem gemessenen Auftrieb, dann mit 5 s Zurückdrehen, danach mit dem Rückwärts-Wert. Das Gleiten endet, wenn dieser Plan es verlangt, spätestens bei 2 km über Grund.
+* **Rückwärts-Wert** nur noch in der Luft gemessen (vorher auch mit veralteten Werten aus 270 km). Fehlt er, gilt der kleinste in der Luft gemessene Cd·A.
+* **Gleit-Abbruch** nur noch, wenn der Rumpf nach unten drückt (unter −0,05 × Widerstand). Ohne Auftrieb bremst das Gleiten immer noch mit dem viel größeren Widerstand. Ist der Abtrieb schon vorher bekannt, beginnt es gar nicht erst.
+* **Nachbau im Testrahmen:** Ohne Gleiten schlägt die Stufe mit 189 m/s auf (Flug: 194). Mit Gleiten (Cd·A 12, Auftrieb 0,2) landet sie mit 5,6 m/s und verbraucht 6,4 t statt aller 16 t.
+* **Zeitraffer wird Physikwarp** (`src/RailWarpGuard.cs`): Solange Booster fliegen, wird eine Anforderung des normalen Zeitraffers (Taste „.“, Pfeile oben links) auf den Physikwarp derselben Stufe umgeleitet, höchstens 4x. Während eine Triebwerkslandung brennt (Zündung bis Aufsetzen), läuft die Zeit normal: Ein laufender Warp wird auf 1x gesetzt, neue Anforderungen werden abgewiesen.
+* **Fallschirme** (`src/ParachuteDeployment.cs`): Die Öffnungshöhe ist nach den gemessenen Werten neu eingestellt (1,5 s Aufgehzeit, 400 m/s², 200 m Reserve, auf die ganze Fahrt, höchstens 5 km). Bei 742 m/s öffnet der Schirm jetzt bei ~2000 m statt bei ~3500 m, bei 554 m/s bei ~1400 m.
+
+## 0.9.41: Schneller Wiedereintritt
+
+Auswertung des Fluges vom 25.09.2026, 21:13 (Kernstufe aus 282 km, Seitenbooster aus 100 km Scheitelhöhe — alle drei abgestürzt):
+
+* **Fallschirme bei schnellem Fall** (`src/ParachuteDeployment.cs`): Die Seitenbooster kamen mit 430 und 600 m/s in 1000 m an; so tief reichte die Strecke nicht mehr zum Bremsen (Aufschlag 128 und 275 m/s). Die Öffnungshöhe wächst jetzt mit der Sinkrate: ~2,5 s zum Aufgehen plus Bremsweg bei 150 m/s² plus 300 m Reserve, höchstens 6 km. Bei normalem Fall (bis ~250 m/s) bleibt es bei der eingestellten Höhe.
+* **Abtrieb des Rumpfes** (`src/DescentAdapter.cs`, `src/LiftPolicy.cs`, `src/DescentPrediction.cs`): Die Kernstufe hing ohne Steuerflächen 10° schief im Luftstrom, und der Rumpf drückte sie mit 0,45 × Widerstand nach unten — bis 40 m/s², so viel wie das Triebwerk. Der Auftrieb wird jetzt aus KSPs eigener Beschleunigung (`Vessel.perturbation`) gemessen und in der Vorhersage eingeplant, soweit er nach unten zeigt.
+* **Luftbremse unter Schub**: Unter Schub richtet sich die Stufe mit der Schwenkdüse auf, Cd·A fiel von 7 auf 4,5–3. Die Vorhersage rechnet die Zündung jetzt mit höchstens 60 % des gemessenen Werts (nie unter dem Rückwärts-Wert). Der Rückwärts-Wert wird nur noch bis 3° Anstellwinkel gemessen (vorher 8°, dort ist er schon 6-mal größer).
+* **Bremsen entlang der Bahn** (`src/CaptureBraking.cs`): Solange die Luft die Lage bestimmt, lief das Triebwerk immer voll — auch wenn die Stufe schon unter die Profilgeschwindigkeit gebremst war. Danach sank sie langsam und teuer. Jetzt höchstens 1,3 × das Nötige.
+* **Gleiten nur, wenn es trägt** (`src/DescentGuidance.cs`): Liefert der Rumpf 10 s nach Beginn keinen Auftrieb nach oben, wird das Gleiten beendet (Log: „Gleiten beendet …“).
+* **Steuerflächen im Rückwärtsflug** (`src/ControlSurfaceFlow.cs`): KSP rechnet den Ausschlag einer Steuerfläche nur aus ihrer Lage zum Schwerpunkt, nicht aus der Anströmung. Fällt der Booster mit dem Triebwerk voran, wirkt jede Fläche deshalb seitenverkehrt und arbeitet gegen Reaktionsrad und Schwenkdüse. Solange die Luft von hinten kommt (ab 30 m/s, mit Hysterese), wird der Stellbereich jeder Fläche mit umgekehrtem Vorzeichen gesetzt, danach wieder der Originalwert. Nur an getrackten Boostern, nie am geflogenen Schiff; Luftbremsen bleiben unberührt. Log: „Steuerflaechen … umgekehrt“.
+* Log: `Landing predict` zeigt zusätzlich `cda=` und `auftrieb=`; „Chute opened“ zeigt Sinkrate und Öffnungshöhe.
+
+## 0.9.40: Blase um ferne Booster, Aufräumen
+
+**Blase um den Booster** (Flüge vom 25.09.2026):
+
+* **Bezugssystem** (`src/RotatingFrameHold.cs`): Steigt das aktive Schiff über ~100 km, schaltet KSP auf ein nicht mitdrehendes System, und für ferne Booster steht die Luft dann still — sie trieben mit Kerbins 175 m/s über den Boden. Das mitdrehende System bleibt jetzt, solange ein Booster mit Physik in der Luft ist oder noch auf dem Boden steht (sonst schleudert das wegdrehende Gelände ihn weg).
+* **Gelände** (`src/TerrainDetailBubble.cs`): KSP schaltet das Gelände ab 160 km Höhe des aktiven Schiffs ganz ab und baut es sonst nur um das aktive Schiff fein. Jetzt bleibt es aktiv und wird um beobachtete und bodennahe Booster so fein gebaut wie um das aktive Schiff, mit echten Bodenkollidern. Das Kamerabild blendet das Gelände voll ein und verankert die Texturen am Planeten.
+* **Kamera**: Bild in Fenstergröße, am Ende des Frames, im Takt der Physik (`cameraFps` 5–60).
+* **Abschaltentscheidung** (`src/CutoffPolicy.cs`): Eine Triebwerkslandung wird beim Abschalten 1,5 m über Grund bewertet und dann geborgen.
+* **Gleitflug**: 35° Anstellwinkel im antriebslosen Sinkflug (braucht Steuerflächen).
+* `GroundPatch` ist nur noch Sicherheitsnetz und tritt zurück, sobald echter Boden darunter liegt.
+
+**Entfernt:** die portierte MechJeb-Landekette (`guidanceMode = legacy`, `LandingController`, Schubregler, `MJFinalDescent` & Co., `BrakingEnvelope`, `ApproachDescentSpeedPolicy`, die LandingPort-Tests), die Messsonde `TerrainProbe`, das Laufzeit-Anhängen des Vorhalt-Moduls (`FuelReserveAttach`, das Modul steht seit 0.9.3x über `FuelReserveConfig` in der Teiledefinition), der alte Zeitraffer-Lock und ungenutzte Konfigurationswerte. `settings.cfg` wird einmal auf `configVersion = 8` umgeschrieben; `guidanceMode`, `reserveHudX/Y` verschwinden.
+
+**Behoben** (Code-Durchsicht):
+
+* Bodenscan in Flugrichtung bekam die Rumpftiefe mit falschem Vorzeichen (Anstieg voraus kam viel zu spät an).
+* Kontrollmodul-Schonfrist nach der Trennung war nur ein Tick lang.
+* Bodenspur-Gegenprobe galt nur an jedem vierten Tick; Radius jetzt der der Stufe, nicht des Planeten.
+* Hitzeschutz blieb nach einer Autostage-Trennung auf Teilen des neuen Schiffs dauerhaft an; galt auch für einen Booster, auf den der Spieler wechselt.
+* Erzwungenes Schirmöffnen umging das Sinkflug-Tor und (ohne Hitzeschutz) KSPs Sicherheitsurteil.
+* Schirme von Stufen, die der Mod nicht übernimmt (z. B. über `maxBoosters`), wurden dauerhaft entschärft.
+* Anker-Teil im Journal wurde für noch nicht geladene Booster gelöscht; nicht übernommene Folgestufen blieben „Tracking".
+* Eine Stufe mit leerem Triebwerk wurde als Triebwerkslander übernommen.
+* Sanftes Aufsetzen: bei Ziel-Sinken unter 1,5 m/s beschleunigte die Endphase in den letzten 15 m.
+* Schwache Booster (Schub·0,8 < g) bekamen unter der Fanghöhe nicht den vollen Schub.
+* Das 80°-Tor der Schubsperre galt schon, wenn das Triebwerk nur gezündet war.
+* Gleitflug startete ohne gemessenen Rückwärts-Widerstand (Zündung zu spät) und pendelte an der Grenze.
+* Sicherheitsnetz-Boden wurde auf den letzten 2,3 km alle 0,1 s neu gebaut; ein Material pro Aufbau blieb liegen.
+* Nach Schiffswechsel folgte das Gelände-Detail nicht mehr dem aktiven Schiff.
+* Flugschreiber: jeder Tick unter 1 km ging zu 60 % verloren, CSV-Spalte mit Kommas zerbrach die Datei.
+* Booster, deren Bergung abgelehnt wurde, wurden jede 0,1 s neu bewertet und hielten Warp gesperrt.
+
+## 0.9.39: Seitwärtsgeschwindigkeit wieder richtig gelesen
+
+KSPs horizontale Geschwindigkeit ist nach einer Floating-Origin-Verschiebung falsch: eine Stufe am
+Fallschirm, die mit 8 m/s niederging, las 175 m/s seitlich — praktisch genau Kerbins
+Rotationsgeschwindigkeit (174,9 m/s). Die Gegenprobe über die eigene Bodenspur aus Breiten- und
+Längengrad gab es zwar schon, sie war aber **wirkungslos**: ihre Referenzprobe wurde bei *jedem*
+Tick erneuert, also war ihr Abstand immer der Tick-Abstand — bei 50 Hz genau 0,02 s — und die
+Bedingung `dt > 0.02` lief damit nie. Sie griff nur, wenn die Bildrate kurz einbrach.
+
+Jetzt vergleicht `src/GroundTrack.cs` über ein Fenster von **0,3 s** (bei 175 m/s rund 50 m Bogen)
+und nimmt bei Abweichung über **25 m/s** den kleineren Wert; die Referenz rückt erst nach Ablauf des
+Fensters weiter. Reine Arithmetik ohne KSP, **18 Prüfungen** in `tests/GroundTrackTests.cs` —
+darunter die Datumsgrenze und genau der gemeldete Fall (50-Hz-Ticks, stillstehend, Anzeige 175 m/s
+→ 0 m/s).
+
+Folge: Die „~175,6 m/s seitlich" in den vorigen Flügen waren **kein Flugverhalten, sondern dieser
+Auslesefehler**. Der Mod sperrte damit die Triebwerkslandung (`PoweredLanding` verlangt seitlich
+≤ 2 m/s), und die Einordnung dieser Landungen ist nicht mehr belastbar: eine Stufe am Schirm mit
+5,85 m/s Sinken, die als Absturz gezählt wurde, ist der nächste Verdachtsfall.
+
+Dazu drei Korrekturen am eigenen Boden aus 0.9.38 (aus einem Flugbericht: „der Booster steht auf
+einer unsichtbaren Fläche, gleitet seitwärts bis zum Rand, fällt herunter und geht kaputt"):
+
+* Das Netz bekommt **nicht mehr KSPs Geländematerial**, sondern ein eigenes, sichtbares: der
+  Terrain-Shader (mit Parallax erst recht) rendert ein zur Laufzeit gebautes Netz nicht — die
+  Fläche war unsichtbar.
+* Der **eigene Kollider zählt nicht mehr als fremder Boden**. Vorher fiel damit die
+  Höhenerkennung aus: eine Stufe, die auf dem Netz stand, wurde nie als aufgesetzt erkannt — keine
+  Bergung, weiter offene Schirme, und weil der Boden nicht mehr nachgeführt wurde, rutschte sie bis
+  über den Rand und stürzte ab. Der Booster war damit ein Hindernis statt Grund.
+* Das Netz ist jetzt **1000 m** breit statt 700 m — Reserve für eine Stufe, die noch seitlich treibt.
 
 ## 0.9.38: Eigener Boden unter fernen Boostern
 
@@ -825,13 +953,7 @@ Für diesen Flug bleibt `guidanceMode = legacy` die sichere Wahl, bis die Eintri
 Drag-Cubes eingemessen ist. Die Phase ist im Modell nur eingeschränkt prüfbar: die eigentliche
 Arbeit leistet der Überschallwiderstand, und den liefert nur KSP.
 
-**Noch nicht im Spiel erprobt.** Der Testlauf verwendet ein idealisiertes Modell; KSPs echte Triebwerksrampen, Drag-Cubes und Gelände können davon abweichen. Es gibt deshalb einen Schalter:
-
-```cfg
-guidanceMode = predictive    // oder: legacy
-```
-
-`legacy` legt die übernommene MechJeb-Kette wieder in die Hand des Autopiloten — ohne Neubau, direkt in `PluginData/settings.cfg`.
+(Der Schalter `guidanceMode` und die alte MechJeb-Kette sind seit 0.9.40 entfernt.)
 
 ## Einstellungen der neuen Landung
 
@@ -839,7 +961,6 @@ Alle in `GameData/PhysStageRecovery/PluginData/settings.cfg`, bei geschlossenem 
 
 | Schlüssel | Standard | Bedeutung |
 |---|---|---|
-| `guidanceMode` | `predictive` | `legacy` = alte MechJeb-Kette |
 | `landingSpeed` | 0,5 | **Ziel-Sinken** — im Fenster einstellbar; Anker der Sinkratenleiter [m/s]. Seit 0.9.36 der einzige Schlüssel dafür (früher `touchdownSpeed`) |
 | `terminalAltitude` | 50 | Höhe über Grund, ab der senkrecht gesunken wird [m] |
 | `tiltLimit` | 20 | größte Neigung beim Bremsen [Grad] |

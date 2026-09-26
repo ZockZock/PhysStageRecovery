@@ -2,10 +2,8 @@ namespace BoosterWatch
 {
     // Wann ein eigener Boden unter einen getrackten Booster gebaut wird.
     //
-    // KSP baut Gelaende und Bodenkollision nur um das aktive Schiff. Ein Booster, der weit weg
-    // landet, fliegt deshalb gegen nichts: die prozedurale Hoehe ist dort die einzige
-    // Bodenreferenz, und der Aufsetzkontakt muss geschaetzt werden (TouchdownPolicy.HeightContact).
-    // Ein eigenes Hoehenfeld unter dem Booster gibt ihm wieder echten Boden.
+    // Das Hoehenfeld ist das Sicherheitsnetz unter fernen Boostern (siehe GroundPatch); ob echter
+    // Boden darunter liegt, entscheidet GroundPatch.SetRealGround, nicht diese Regel.
     //
     // Die Entscheidung haengt bewusst NICHT davon ab, ob gerade ein fremder Kollider gefunden
     // wurde: der eigene Patch ist selbst so ein Kollider. Wuerde er mitgezaehlt, waere er im

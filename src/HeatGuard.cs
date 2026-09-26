@@ -19,7 +19,10 @@ namespace BoosterWatch
         // Far above any atmospheric entry the stock game produces on the home world.
         private const double ImmuneTemperature = 100000;
 
-        private readonly Dictionary<uint, double[]> originals = new Dictionary<uint, double[]>();
+        // Keyed by the part itself, not by the vessel it is on: after an auto-stage separation the
+        // parts are spread over two vessels, and restoring only the old one left the others at
+        // 100000 K for good (and the next tracker recorded that as their "original" limit).
+        private readonly Dictionary<Part, double[]> originals = new Dictionary<Part, double[]>();
 
         // How many parts currently carry raised limits. Diagnostic only.
         public int Protected { get { return originals.Count; } }
@@ -35,13 +38,23 @@ namespace BoosterWatch
                 foreach (Part part in vessel.parts)
                 {
                     if (part == null || part.flightID == 0) continue;
-                    if (!originals.ContainsKey(part.flightID))
-                        originals[part.flightID] = new[] { part.maxTemp, part.skinMaxTemp };
+                    if (!originals.ContainsKey(part))
+                        originals[part] = new[] { Original(part.maxTemp, part, false), Original(part.skinMaxTemp, part, true) };
                     if (part.maxTemp < ImmuneTemperature) part.maxTemp = ImmuneTemperature;
                     if (part.skinMaxTemp < ImmuneTemperature) part.skinMaxTemp = ImmuneTemperature;
                 }
             }
             catch (Exception e) { Debug.LogError("[PhysStageRecovery] Heat guard failed: " + e.Message); }
+        }
+
+        // A value that is already raised is not an original: a part split off another tracked booster
+        // still carries that guard's limit. The part's prefab knows the stock one.
+        private static double Original(double current, Part part, bool skin)
+        {
+            if (current < ImmuneTemperature) return current;
+            Part prefab = part.partInfo != null ? part.partInfo.partPrefab : null;
+            if (prefab == null) return current;
+            return skin ? prefab.skinMaxTemp : prefab.maxTemp;
         }
 
         // Puts the stock limits back. A part that is hotter than its original limit right now
@@ -50,20 +63,14 @@ namespace BoosterWatch
         {
             try
             {
-                if (originals.Count == 0) return;
-                if (vessel != null && vessel.parts != null)
-                    foreach (Part part in vessel.parts)
-                    {
-                        if (part == null) continue;
-                        double[] values;
-                        if (!originals.TryGetValue(part.flightID, out values)) continue;
-                        part.maxTemp = values[0]; part.skinMaxTemp = values[1];
-                        originals.Remove(part.flightID);
-                    }
+                foreach (KeyValuePair<Part, double[]> entry in originals)
+                {
+                    // Every recorded part that still exists, whichever vessel it is on now.
+                    if (entry.Key == null) continue;
+                    entry.Key.maxTemp = entry.Value[0]; entry.Key.skinMaxTemp = entry.Value[1];
+                }
             }
             catch (Exception e) { Debug.LogError("[PhysStageRecovery] Heat guard restore failed: " + e.Message); }
-            // Parts that left the vessel in the meantime keep their raised limits; they are debris
-            // and no longer tracked, so the record is dropped instead of growing without bound.
             originals.Clear();
         }
     }

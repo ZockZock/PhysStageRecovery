@@ -20,7 +20,7 @@ namespace BoosterWatch
         private Guid originId;
         private uint originRoot;
         private bool initialized, enabledMod = true, autoRecovery = true, visible = false, cameraEnabled = true;
-        private bool uiVisible = true, faulted, warpLocked;
+        private bool uiVisible = true, faulted;
         private bool resizing, geometryDirty, cameraDirty;
         private float cameraSaveAt;
         private readonly WindowOpenPolicy windowOpenPolicy = new WindowOpenPolicy();
@@ -43,7 +43,10 @@ namespace BoosterWatch
         private ApplicationLauncherButton toolbar;
         private Texture2D icon;
         private string notice = "";
-        private const string HoverLock = "BoosterWatch.Hover", WarpLock = "BoosterWatch.Warp";
+        private const string HoverLock = "BoosterWatch.Hover";
+        // One place for the version the window and the log show (AssemblyInfo and the .version file
+        // carry the same number).
+        public const string Version = "0.9.48";
         // Degrees of camera turn per unit of the mouse axis, which is what the stock camera feels
         // like. One wheel notch is 0.1, so a notch changes the distance by eight percent.
         private const float CameraTurnSpeed = 4f;
@@ -64,13 +67,23 @@ namespace BoosterWatch
             chuteHeightInput = settings.ChuteHeight.ToString("0", CultureInfo.InvariantCulture);
             ParachuteDeployment.OpenAboveGround = (float)settings.ChuteHeight;
             autoStageInput = settings.AutoStage; poweredInput = settings.PoweredLanding;
-            try { ParachuteGuard.Install(this); RailWarpGuard.Install(TrackingPhysics, Loc.Get("#PSR_Screen_Warp")); }
+            try { ParachuteGuard.Install(this); }
             catch (Exception e)
             {
                 faulted = true;
                 notice = Loc.Get("#PSR_Notice_GuardUnavailable");
                 Debug.LogError("[PhysStageRecovery] Unable to install parachute guard: " + e);
             }
+            // The warp guard is a convenience; without it the mod still works (Update drops a
+            // running rails warp while boosters are tracked).
+            try { RailWarpGuard.Install(TrackingPhysics, Loc.Get("#PSR_Screen_Warp"), LandingBurn, Loc.Get("#PSR_Screen_WarpLanding")); }
+            catch (Exception e) { Debug.LogError("[PhysStageRecovery] Warp guard not available: " + e); }
+            // Eigener Versuch: faellt der Halter aus, laeuft der Rest des Mods trotzdem.
+            try { RotatingFrameHold.Install(AtmosphereHoldBody); }
+            catch (Exception e) { Debug.LogError("[PhysStageRecovery] Bezugssystem-Halter nicht verfuegbar: " + e); }
+            try { TerrainDetailBubble.Install(DetailVessels); }
+            catch (Exception e) { Debug.LogError("[PhysStageRecovery] Gelaende-Detail nicht verfuegbar: " + e); }
+            StartCoroutine(RenderAtEndOfFrame());
             GameEvents.onHideUI.Add(HideUI);
             GameEvents.onShowUI.Add(ShowUI);
             GameEvents.onGUIApplicationLauncherReady.Add(AddToolbar);
@@ -78,7 +91,7 @@ namespace BoosterWatch
             GameEvents.onCrash.Add(OnCrash);
             GameEvents.onCrashSplashdown.Add(OnCrash);
             AddToolbar();
-            Debug.Log("[PhysStageRecovery] 0.9.38 started; physics range " + settings.PhysicsRange + " m.");
+            Debug.Log("[PhysStageRecovery] " + Version + " started; physics range " + settings.PhysicsRange + " m.");
         }
 
         private void AddToolbar()
@@ -127,12 +140,32 @@ namespace BoosterWatch
             if (!visible || !uiVisible || FlightDriver.Pause) InputLockManager.RemoveControlLock(HoverLock);
             HandleCameraInput();
             if (cameraDirty && !Input.GetMouseButton(1) && Time.unscaledTime >= cameraSaveAt) SaveGeometry();
-            if (TrackingPhysics())
+            // Rails warp would pack every booster; RailWarpGuard refuses new requests, this drops an
+            // already running one (e.g. started before the separation).
+            if (TrackingPhysics() && TimeWarp.WarpMode == TimeWarp.Modes.HIGH && TimeWarp.CurrentRateIndex != 0)
+                TimeWarp.SetRate(0, true);
+            // Normaler Zeitraffer mit Boostern auf der Bahn: vor dem Eintritt rechtzeitig herunterbremsen.
+            else if (enabledMod && !faulted && TimeWarp.WarpMode == TimeWarp.Modes.HIGH && TimeWarp.CurrentRateIndex != 0
+                && TimeWarp.fetch != null && boosters.Any(b => !b.Finished && b.Vessel != null))
             {
-                warpLocked = true;
-                if (TimeWarp.WarpMode == TimeWarp.Modes.HIGH && TimeWarp.CurrentRateIndex != 0) TimeWarp.SetRate(0, true);
+                double allowed = WarpWindow.AllowedRate(SecondsToFirstEntry());
+                if (TimeWarp.CurrentRate > allowed + 1e-3)
+                {
+                    int index = WarpWindow.IndexFor(TimeWarp.fetch.warpRates, allowed);
+                    if (index < TimeWarp.CurrentRateIndex)
+                    {
+                        TimeWarp.SetRate(index, true);
+                        ScreenMessages.PostScreenMessage(Loc.Get("#PSR_Screen_WarpEntry",
+                            SecondsToFirstEntry().ToString("0")), 3, ScreenMessageStyle.UPPER_CENTER);
+                    }
+                }
             }
-            else ReleaseWarp();
+            // Brennt eine Triebwerkslandung, laeuft die Zeit normal (siehe RailWarpGuard).
+            if (TimeWarp.CurrentRateIndex != 0 && RailWarpGuard.LandingBurn)
+            {
+                TimeWarp.SetRate(0, true);
+                ScreenMessages.PostScreenMessage(Loc.Get("#PSR_Screen_WarpLanding"), 3, ScreenMessageStyle.UPPER_CENTER);
+            }
         }
 
         // The pointer sits on the mod window: the feed camera takes the mouse, the stock camera keeps
@@ -158,7 +191,38 @@ namespace BoosterWatch
             { cameraDirty = true; cameraSaveAt = Time.unscaledTime + 0.4f; }
         }
 
-        private bool TrackingPhysics() { return enabledMod && !faulted && boosters.Any(b => !b.Finished && b.Vessel != null); }
+        // Eine Triebwerkslandung brennt gerade (Zuendung bis Aufsetzen).
+        private bool LandingBurn()
+        {
+            return boosters.Any(b => !b.Finished && b.Vessel != null && b.Vessel.loaded && !b.Vessel.packed
+                && b.Landing.OwnsControl && (b.Landing.Phase == Guidance.DescentPhase.Burn
+                    || b.Landing.Phase == Guidance.DescentPhase.Terminal || b.Landing.Phase == Guidance.DescentPhase.Touchdown));
+        }
+        // Ein Booster braucht Physik, wenn er in der Luft ist oder bald hineinfaellt (WarpWindow). Im
+        // Vakuum auf seiner Bahn darf der normale Zeitraffer laufen.
+        private bool TrackingPhysics()
+        {
+            return enabledMod && !faulted && boosters.Any(b => !b.Finished && b.Vessel != null)
+                && SecondsToFirstEntry() <= WarpWindow.PhysicsLeadSeconds;
+        }
+
+        // Fruehester Eintritt aller verfolgten Booster, halbsekuendlich neu gerechnet und dazwischen
+        // mit der vergangenen Spielzeit heruntergezaehlt.
+        private double entryCache = 0, entryCacheUt = double.NaN;
+        private float entryCacheReal = -1;
+        private double SecondsToFirstEntry()
+        {
+            double now = Planetarium.GetUniversalTime();
+            if (double.IsNaN(entryCacheUt) || Time.unscaledTime - entryCacheReal > 0.5f || now < entryCacheUt)
+            {
+                double first = double.PositiveInfinity;
+                foreach (TrackedBooster b in boosters)
+                    if (!b.Finished && b.Vessel != null)
+                        first = Math.Min(first, WarpWindow.SecondsToAtmosphere(b.Vessel, now));
+                entryCache = first; entryCacheUt = now; entryCacheReal = Time.unscaledTime;
+            }
+            return Math.Max(0, entryCache - (now - entryCacheUt));
+        }
 
         private void SetVisible(bool value)
         {
@@ -198,6 +262,7 @@ namespace BoosterWatch
 
         public void FixedUpdate()
         {
+            cameraFeed.PhysicsTick();
             if (!optionsLoaded && RecoveryJournal.Instance != null)
             {
                 if (!settings.HasBehaviorSettings)
@@ -228,7 +293,7 @@ namespace BoosterWatch
                 FollowStageSeparations();
                 // Always keep the range change on consecutive physics ticks.
                 foreach (TrackedBooster b in boosters)
-                    if (!b.Finished && b.Vessel != null) b.ExtendUnpack(settings);
+                    if (!b.Finished && b.Vessel != null) b.ExtendUnpack();
                 if (Time.unscaledTime >= nextScan)
                 {
                     nextScan = Time.unscaledTime + 0.2f;
@@ -250,9 +315,34 @@ namespace BoosterWatch
                         b.Finished = true; b.Status = "Nicht mehr vorhanden (keine Bergung)";
                         SetJournalStatus(b, "Lost"); continue;
                     }
+                    // The player switched to this booster: it is theirs now. No automat, no heat
+                    // immunity, no recovery out from under them.
+                    if (b.Vessel == FlightGlobals.ActiveVessel)
+                    {
+                        b.Restore(); b.Finished = true; b.Status = "Vom Spieler uebernommen";
+                        SetJournalStatus(b, "Excluded"); continue;
+                    }
                     // KSP reports a real physical contact; the tracked booster adds the case where
                     // KSP built no ground collider at all and the exact terrain height was reached.
                     bool groundContact = b.Vessel.LandedOrSplashed || b.SyntheticContact;
+                    // Triebwerkslandung: entschieden wurde beim Abschalten in Schnitthoehe.
+                    if (b.CutoffVerdict == TouchdownOutcome.Crashed && groundContact)
+                    { FinishContact(b, TouchdownOutcome.Crashed); continue; }
+                    if (CutoffPolicy.RecoverNow(b.CutoffVerdict, b.CutoffTime, now, groundContact))
+                    {
+                        bool whole = b.CutoffParts.SetEquals(b.Vessel.parts.Select(p => p.flightID));
+                        if (!whole) { b.CutoffVerdict = TouchdownOutcome.Crashed; FinishContact(b, TouchdownOutcome.Crashed); continue; }
+                        b.TouchdownOutcome = TouchdownOutcome.Safe;
+                        b.ContactParts.Clear();
+                        foreach (uint id in b.CutoffParts) b.ContactParts.Add(id);
+                        b.Landing.Stop("aufgesetzt (Abschaltentscheidung)");
+                        b.Status = "Aufgesetzt (beim Abschalten bestaetigt)";
+                        if (autoRecovery) Recover(b, b.Vessel.LandedOrSplashed);
+                        // Recover can decline (journal, player switched ...): then it stays down for
+                        // a manual recovery instead of being re-evaluated every tick.
+                        if (!b.Finished) FinishContact(b, TouchdownOutcome.Safe);
+                        continue;
+                    }
                     if (groundContact)
                     {
                         // Capture impact evidence ONCE. Re-reading the airborne sample after it
@@ -263,9 +353,7 @@ namespace BoosterWatch
                                 b.ImpactFailed);
                             b.ContactParts.Clear();
                             foreach (uint id in b.KnownParts) b.ContactParts.Add(id);
-                            // Measurement only: the height comparison at the exact moment of contact,
-                            // which is where a coarse distant collider would show up.
-                            Debug.Log("[PhysStageRecovery] " + TerrainProbe.Report(b.Vessel, b.GroundDepth, b.RejectedCollider));
+                            b.LastContactTime = now;
                         }
                         bool livePhysics = b.Vessel.loaded && !b.Vessel.packed && !b.Vessel.HoldPhysics;
                         bool intact = !livePhysics || b.ContactParts.SetEquals(b.Vessel.parts.Select(p => p.flightID));
@@ -275,9 +363,12 @@ namespace BoosterWatch
                         // Real touchdown: the booster is down and the contact was not a crash, so
                         // it is recovered right away. No resting time is required. The guidance
                         // must stop commanding thrust as soon as it is down, or it would lift off.
-                        b.Landing.Stop(b.SyntheticContact ? "Bodenhoehe erreicht" : "aufgesetzt", false);
+                        b.Landing.Stop(b.SyntheticContact ? "Bodenhoehe erreicht" : "aufgesetzt");
                         b.Status = b.SyntheticContact ? "Aufgesetzt (Bodenhoehe, kein Collider)" : "Aufgesetzt";
-                        if (autoRecovery) Recover(b, !b.SyntheticContact); else FinishContact(b, TouchdownOutcome.Safe);
+                        if (autoRecovery) Recover(b, !b.SyntheticContact);
+                        // Recover can decline (journal, packed ...): then it stays down for a manual
+                        // recovery instead of being re-evaluated every tick.
+                        if (!b.Finished) FinishContact(b, TouchdownOutcome.Safe);
                         continue;
                     }
                     // Back in the air: forget the cached contact evidence.
@@ -292,8 +383,7 @@ namespace BoosterWatch
                     JournalEntry stagingEntry = null;
                     if (RecoveryJournal.Instance != null)
                         RecoveryJournal.Instance.Entries.TryGetValue(b.Id, out stagingEntry);
-                    if (b.AutoStage(settings, stagingEntry)) continue;
-                    
+                    b.AutoStage(settings, stagingEntry);
                 }
             }
             catch (Exception e)
@@ -301,7 +391,7 @@ namespace BoosterWatch
                 faulted = true;
                 notice = Loc.Get("#PSR_Notice_ModHalted");
                 Debug.LogError("[PhysStageRecovery] Simulation disabled after error: " + e);
-                ReleaseWarp();
+                ClearBoxMarks();
                 foreach (TrackedBooster b in boosters) b.Restore();
             }
         }
@@ -327,7 +417,6 @@ namespace BoosterWatch
             if (journal == null) return;
             Debug.Log("[PhysStageRecovery] Mission: " + active.vesselName + " parts=" + family.Count
                 + " boosterChutes=" + attachedBoosterChutes.Count + " journalEntries=" + journal.Entries.Count);
-            TerrainProbe.LogSetup(active.mainBody);
             foreach (JournalEntry entry in journal.Entries.Values)
                 foreach (uint part in entry.FailedParts) failedParts.Add(part);
             foreach (JournalEntry e in journal.Entries.Values.ToArray())
@@ -340,7 +429,8 @@ namespace BoosterWatch
                         .FirstOrDefault(p => p.flightID == e.AnchorPart);
                     if (anchor != null) v = anchor.vessel;
                 }
-                if (v != null && v.GetCrewCount() == 0 && v.mainBody.isHomeWorld)
+                if (v != null && v.GetCrewCount() == 0 && v.mainBody.isHomeWorld
+                    && v != active && v.id != originId && !v.LandedOrSplashed)
                 {
                     if (v.id != e.Id) MigrateJournal(e, v);
                     AddBooster(v);
@@ -382,8 +472,10 @@ namespace BoosterWatch
                                 || c.deploymentState == ModuleParachute.deploymentStates.ACTIVE));
                         bool openChute = canopies.Any(c => c.deploymentState == ModuleParachute.deploymentStates.SEMIDEPLOYED
                             || c.deploymentState == ModuleParachute.deploymentStates.DEPLOYED);
+                        // An engine only counts with something to burn: a spent stage is no landing
+                        // means and would only keep the physics range up and warp blocked.
                         bool engines = v.parts.Any(p => p.FindModulesImplementing<ModuleEngines>()
-                            .Any(PoweredLanding.Suitable));
+                            .Any(e => PoweredLanding.Suitable(e) && PoweredLanding.HasPropellant(e)));
                         // A control module is what lets KSP's engines answer a throttle at all; see
                         // TrackingAcceptance for why an engine without one is refused.
                         bool control = v.parts.Any(p => p.FindModuleImplementing<ModuleCommand>() != null);
@@ -392,15 +484,27 @@ namespace BoosterWatch
                         if (refusal != null) skip = Loc.Get(refusal);
                     }
                 }
-                if (skip != null) { ReportSkip(v, skip); continue; }
+                if (skip != null)
+                {
+                    ReportSkip(v, skip);
+                    // Packed vessels are looked at again once they unpack; everything else is final
+                    // for this flight, and its canopies go back to stock (BlockParachuteOpening).
+                    if (!v.packed) rejected.Add(v.id);
+                    continue;
+                }
                 if (boosters.Count(b => !b.Finished) >= settings.MaxBoosters)
                 {
                     notice = Loc.Get("#PSR_Notice_BoosterLimit", settings.MaxBoosters);
+                    rejected.Add(v.id);
                     break;
                 }
                 AddBooster(v, true);
             }
         }
+
+        // Vessels of this rocket the mod decided not to take over. Their canopies must not stay under
+        // the "not yet scanned" veto: that disarmed them on every tick and they fell without one.
+        private readonly HashSet<Guid> rejected = new HashSet<Guid>();
 
         // One log line per rejected vessel and flight, plus a short hint in the window.
         private void ReportSkip(Vessel v, string reason)
@@ -417,7 +521,8 @@ namespace BoosterWatch
 
         private void AddBooster(Vessel v, bool newSeparation = false)
         {
-            if (boosters.Any(b => b.Id == v.id)) return;
+            if (boosters.Any(x => x.Id == v.id)) return;
+            rejected.Remove(v.id);
             TrackedBooster b = new TrackedBooster(v, settings);
             boosters.Add(b);
             foreach (Part p in v.parts) family.Add(p.flightID);
@@ -439,7 +544,9 @@ namespace BoosterWatch
             if (entry.StageCursor < 0) entry.StageCursor = Math.Max(0, v.currentStage);
             if (entry.AnchorPart != 0)
                 b.Anchor = v.parts.FirstOrDefault(p => p.flightID == entry.AnchorPart) ?? b.Anchor;
-            entry.AnchorPart = b.Anchor != null ? b.Anchor.flightID : 0;
+            // A booster restored far away is not loaded yet (no parts, no anchor). Its saved anchor
+            // must survive that, or the next auto-stage separation can no longer be followed.
+            if (b.Anchor != null) entry.AnchorPart = b.Anchor.flightID;
         }
 
         private void MigrateJournal(JournalEntry entry, Vessel next)
@@ -459,7 +566,13 @@ namespace BoosterWatch
                 if (b.Finished || b.Anchor == null || b.Anchor.vessel == null || b.Anchor.vessel == b.Vessel) continue;
                 Vessel next = b.Anchor.vessel;
                 b.Restore(); b.Finished = true; b.Status = "Nach Stufentrennung weiterverfolgt";
-                if (next == FlightGlobals.ActiveVessel || next.GetCrewCount() != 0 || !next.mainBody.isHomeWorld) continue;
+                if (next == FlightGlobals.ActiveVessel || next.GetCrewCount() != 0 || !next.mainBody.isHomeWorld)
+                {
+                    // Not taken over - the entry must not stay "Tracking", or the next load picks
+                    // that vessel up again (even the one the player flies).
+                    SetJournalStatus(b, "Excluded");
+                    continue;
+                }
                 JournalEntry entry;
                 RecoveryJournal journal = RecoveryJournal.Instance;
                 if (journal != null && journal.Entries.TryGetValue(b.Id, out entry)) MigrateJournal(entry, next);
@@ -494,7 +607,7 @@ namespace BoosterWatch
                 foreach (uint part in b.KnownParts) failedParts.Add(part);
                 if (b.Vessel != null) foreach (Part part in b.Vessel.parts) failedParts.Add(part.flightID);
                 JournalEntry entry;
-                if (RecoveryJournal.Instance.Entries.TryGetValue(b.Id, out entry))
+                if (RecoveryJournal.Instance != null && RecoveryJournal.Instance.Entries.TryGetValue(b.Id, out entry))
                 {
                     foreach (uint part in b.KnownParts) entry.FailedParts.Add(part);
                     if (b.Vessel != null) foreach (Part part in b.Vessel.parts) entry.FailedParts.Add(part.flightID);
@@ -542,6 +655,7 @@ namespace BoosterWatch
             TrackedBooster b = boosters.FirstOrDefault(item => item.Id == v.id);
             if (b != null && b.Finished) return false;
             if (b == null && !family.Contains(chute.part.flightID)) return false;
+            if (b == null && rejected.Contains(v.id)) return false;
             // A newly separated, not-yet-scanned booster has no trusted descent history.
             if (b == null || !v.loaded || v.packed || v.HoldPhysics)
                 return Blocked(chute, true, v, "Booster noch nicht erfasst");
@@ -550,6 +664,11 @@ namespace BoosterWatch
             // minimum air pressure and its speed check are the real protection, and MechJeb never
             // blocks a canopy either. Vetoing on the safety state here was what silently kept
             // canopies shut in descents that KSP would have opened.
+            // Auch ein durch die Stufung scharfer Schirm wartet, bis der Booster nahe an seiner
+            // Oeffnungshoehe ist - sonst geht er gleich halb auf und haelt ihn kilometerlang langsam.
+            if (!b.ChuteArmAllowed && chute.deploymentState != ModuleParachute.deploymentStates.SEMIDEPLOYED
+                && chute.deploymentState != ModuleParachute.deploymentStates.DEPLOYED)
+                return Blocked(chute, true, v, "wartet bis " + b.ChuteArmHeight.ToString("0") + " m ueber Grund");
             return Blocked(chute, v.verticalSpeed >= 0, v, "Steigflug");
         }
 
@@ -561,7 +680,8 @@ namespace BoosterWatch
                 || !v.mainBody.isHomeWorld || journal == null || !autoRecovery || b.ImpactFailed
                 || b.Finished) return;
             // Only the established collider/terrain contact can authorize recovery.
-            if (!(v.LandedOrSplashed || b.SyntheticContact) || (!b.ContactParts.SetEquals(v.parts.Select(p => p.flightID))
+            bool cutoffSafe = b.CutoffVerdict == TouchdownOutcome.Safe;
+            if (!(v.LandedOrSplashed || b.SyntheticContact || cutoffSafe) || (!b.ContactParts.SetEquals(v.parts.Select(p => p.flightID))
                 || !TouchdownPolicy.RecoveredOnContact(true, b.TouchdownOutcome))) return;
             JournalEntry entry;
             if (!journal.Entries.TryGetValue(b.Id, out entry) || entry.Status != "Tracking") return;
@@ -598,7 +718,8 @@ namespace BoosterWatch
                 b.Status = "Aufgesetzt und geborgen"
                     + (entry.Funds > 0 ? " | +" + entry.Funds.ToString("N0") + " Funds" : "");
                 ScreenMessages.PostScreenMessage(Loc.Get("#PSR_Screen_Recovered", b.Name), 5, ScreenMessageStyle.UPPER_CENTER);
-                Debug.Log("[PhysStageRecovery] Recovered " + b.Id + " groundContact=true"
+                Debug.Log("[PhysStageRecovery] Recovered " + b.Id + " groundContact=" + v.LandedOrSplashed
+                    + (cutoffSafe ? " entscheidung=abschaltung" : "")
                     + " clearance=" + b.Sample.Clearance
                     + " sink=" + b.Sample.Sink + " horizontal=" + b.Sample.Horizontal + " funds=" + entry.Funds);
             }
@@ -616,7 +737,48 @@ namespace BoosterWatch
             if (RecoveryJournal.Instance != null && RecoveryJournal.Instance.Entries.TryGetValue(b.Id, out e)) e.Status = status;
         }
 
-        public void LateUpdate()
+        // Das Kamerabild entsteht am Ende des Frames, wenn KSP alles fuer diesen Frame gesetzt hat:
+        // Floating Origin, Planetendrehung, Scaled Space. In LateUpdate lief es je nach Reihenfolge
+        // vor oder nach KSPs eigenen LateUpdates, und der Hintergrund stand mal einen Frame zurueck.
+        private System.Collections.IEnumerator RenderAtEndOfFrame()
+        {
+            var end = new WaitForEndOfFrame();
+            while (true)
+            {
+                yield return end;
+                try { RenderFeed(); }
+                catch (Exception e) { Debug.LogError("[PhysStageRecovery] Kamerabild: " + e); }
+            }
+        }
+
+        // Fuer TerrainDetailBubble: um diese Booster baut KSP feines Gelaende. Der beobachtete Booster
+        // immer (solange das Bild laeuft), die anderen erst in Bodennaehe - dort brauchen sie die
+        // echten Bodenkollider, weiter oben kostet es nur Quads.
+        private readonly List<Vessel> detailVessels = new List<Vessel>();
+        private const double DetailClearance = 30000;
+        private List<Vessel> DetailVessels()
+        {
+            detailVessels.Clear();
+            if (!enabledMod || faulted || boosters.Count == 0) return detailVessels;
+            Vessel active = FlightGlobals.ActiveVessel;
+            TrackedBooster watched = visible && uiVisible && cameraEnabled
+                ? boosters[Mathf.Clamp(selection, 0, boosters.Count - 1)] : null;
+            if (watched != null && Usable(watched, active)) detailVessels.Add(watched.Vessel);
+            foreach (TrackedBooster b in boosters)
+            {
+                if (b == watched || !Usable(b, active)) continue;
+                double clearance = b.Vessel.altitude - Math.Max(0, b.SurfaceAltitude);
+                if (clearance < DetailClearance) detailVessels.Add(b.Vessel);
+            }
+            return detailVessels;
+        }
+
+        private static bool Usable(TrackedBooster b, Vessel active)
+        {
+            return b != null && !b.Finished && b.Vessel != null && b.Vessel != active && b.Vessel.loaded;
+        }
+
+        private void RenderFeed()
         {
             if (!enabledMod || faulted || !visible || !uiVisible || !cameraEnabled || cameraFeed.Error != null || FlightDriver.Pause
                 || boosters.Count == 0 || settingsOpen) return;
@@ -664,8 +826,9 @@ namespace BoosterWatch
             if (!value)
             {
                 foreach (TrackedBooster b in boosters) b.Restore();
-                ReleaseWarp();
                 cameraFeed.Dispose();
+                // The hatch on the stock stage box is only refreshed while the mod runs.
+                ClearBoxMarks();
                 notice = Loc.Get("#PSR_Notice_Deactivated");
             }
             else
@@ -689,10 +852,23 @@ namespace BoosterWatch
                     + " chutes=" + b.OpenChutes + "/" + b.TotalChutes);
         }
 
-        private void ReleaseWarp()
+        // Die Welt, deren Drehung die Physik mitmachen muss: ein getrackter Booster fliegt dort mit
+        // aktiver Physik in der Atmosphaere. Siehe RotatingFrameHold.
+        private CelestialBody AtmosphereHoldBody()
         {
-            if (warpLocked) InputLockManager.RemoveControlLock(WarpLock);
-            warpLocked = false;
+            if (!enabledMod || faulted) return null;
+            Vessel active = FlightGlobals.ActiveVessel;
+            foreach (TrackedBooster b in boosters)
+            {
+                Vessel v = b.Vessel;
+                // Auch gelandete und fertige Booster, solange sie noch Physik haben: ein Wechsel auf
+                // "Inertial" laesst das Gelaende unter ihnen mit 175 m/s wegdrehen, und PhysX schleudert
+                // den stehenden Booster dann davon (Flug 25.09.2026, 20:01: 21 m/s hoch, 12 rad/s).
+                if (v == null || v == active || !v.loaded || v.packed) continue;
+                CelestialBody body = v.mainBody;
+                if (body != null && body.atmosphere && v.altitude < body.atmosphereDepth) return body;
+            }
+            return null;
         }
 
         public void OnDestroy()
@@ -701,6 +877,8 @@ namespace BoosterWatch
             if (windowTheme != null) windowTheme.Dispose();
             RailWarpGuard.Remove();
             ParachuteGuard.Remove();
+            RotatingFrameHold.Remove();
+            TerrainDetailBubble.Remove();
             GameEvents.onHideUI.Remove(HideUI); GameEvents.onShowUI.Remove(ShowUI);
             GameEvents.onGUIApplicationLauncherReady.Remove(AddToolbar);
             GameEvents.onGUIApplicationLauncherDestroyed.Remove(RemoveToolbar);
@@ -710,7 +888,6 @@ namespace BoosterWatch
             foreach (TrackedBooster b in boosters) b.Restore();
             cameraFeed.Dispose();
             InputLockManager.RemoveControlLock(HoverLock);
-            ReleaseWarp();
         }
     }
 }

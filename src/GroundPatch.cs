@@ -5,11 +5,12 @@ namespace BoosterWatch
 {
     // Eigener Boden unter einem getrackten Booster.
     //
-    // KSP baut Gelaende und dessen Kollision nur um das aktive Schiff. Ein Booster, der hunderte
-    // Kilometer entfernt landet, hat dort keinen Boden: er faellt durch die sichtbare Landschaft,
-    // und der Aufsetzkontakt muss aus der prozeduralen Hoehe geschaetzt werden. Dieses Netz gibt
-    // ihm echten Boden - dieselbe Hoehe, dieselbe Ebene wie KSPs Gelaende ("Local Scenery"),
-    // damit die Teilekollision des Spiels ihn genauso behandelt wie echten Grund.
+    // Sicherheitsnetz. Seit 0.9.40 laesst TerrainDetailBubble KSP auch um ferne Booster echtes
+    // Gelaende mit Kollidern bauen; die feinsten Quads (nur sie tragen Kollider) entstehen aber
+    // unter Zeitbudget und koennen einem schnellen Booster hinterherhinken, und ohne die Blase gaebe
+    // es dort gar keinen Boden. Dieses Netz gibt ihm bis dahin Boden - dieselbe Hoehe, dieselbe
+    // Ebene wie KSPs Gelaende ("Local Scenery"). Sobald echter Boden gefunden wird, tritt es zurueck
+    // (SetRealGround).
     //
     // Zwei Konstruktionsdetails sind wesentlich:
     //   * Der Wurzelknoten haengt unter PQS. Damit gehen Planetenrotation und jede
@@ -19,10 +20,11 @@ namespace BoosterWatch
     //     zugewiesen. PhysX merkt eine Aenderung an derselben Mesh-Instanz sonst nicht.
     public sealed class GroundPatch : IDisposable
     {
-        // 700 m Kantenlaenge bei rund 22 m Punktabstand: fein genug fuer einen Booster, grob
-        // genug, um in einem Tick gebaut zu werden.
+        // 1000 m Kantenlaenge bei rund 31 m Punktabstand: fein genug fuer einen Booster, grob
+        // genug, um in einem Tick gebaut zu werden. Die Breite ist auch eine Reserve: eine Stufe,
+        // die noch seitlich treibt, soll nicht gleich ueber den Rand laufen.
         private const int Resolution = 32;
-        private const double HalfSize = 350.0;
+        private const double HalfSize = 500.0;
 
         private GameObject root, meshObject;
         private Mesh mesh;
@@ -30,6 +32,18 @@ namespace BoosterWatch
         private PQS pqs;
         private CelestialBody body;
         private Vector3d centre;
+        // Mitte des Netzes im PQS-Raum: dreht der Planet (Inertialsystem), wandert sie mit ihm.
+        private Vector3 centreLocal;
+        // Wo der Booster beim letzten Bau stand, im PQS-Raum. Verglichen wird die WAAGERECHTE
+        // Strecke seitdem: bis 0.9.39 wurde der Abstand zur Netzmitte am Boden genommen - der ist
+        // die Hoehe ueber Grund und damit ueber 150 m immer "weit gezogen"; das Netz wurde auf den
+        // letzten 2,3 km jedes fernen Sinkflugs alle 0,1 s neu gebaut (1089 Hoehenabfragen).
+        private Vector3 builtFromLocal;
+        // Eine Materialinstanz fuer alle Flaechen; frueher blieb bei jedem Abbau eine liegen.
+        private static Material sharedMaterial;
+        // Wie viele Messungen in Folge echter Boden unter dem Booster lag (SetRealGround).
+        private int realGroundTicks;
+        private const int RealGroundConfirmTicks = 3;
         private double builtAt = double.NegativeInfinity;
         private readonly Vector3[] vertices = new Vector3[GroundField.VertexCount(Resolution)];
         private readonly Vector2[] uv = new Vector2[GroundField.VertexCount(Resolution)];
@@ -37,8 +51,29 @@ namespace BoosterWatch
         private bool reported;
 
         public bool Exists { get { return meshObject != null; } }
+        // Der eigene Kollider. Der Booster darf ihn nicht fuer fremden Boden halten, sonst faellt
+        // die Hoehenerkennung aus und die Landung wird nie erkannt (siehe TrackedBooster).
+        public Collider Surface { get { return collider; } }
         public double SurfaceAltitude { get; private set; }
-        public double BuiltAt { get { return builtAt; } }
+
+        // Liegt echter Boden (KSPs eigene Gelaendekollider) unter dem Booster? Dann verschwindet die
+        // braune Flaeche sofort (sie laege genau auf dem Gelaende und flimmerte), und nach einigen
+        // Messungen Bestaetigung auch ihr Kollider: das Hoehenfeld ist bilinear auf 31 m und kann
+        // bis zu einem Meter UEBER dem echten Boden liegen - der Booster stuende sonst auf einer
+        // unsichtbaren Flaeche. Geht der echte Boden verloren, ist beides sofort wieder da.
+        public void SetRealGround(bool real)
+        {
+            realGroundTicks = real ? realGroundTicks + 1 : 0;
+            ApplyVisibility();
+        }
+
+        private void ApplyVisibility()
+        {
+            if (meshObject == null) return;
+            MeshRenderer view = meshObject.GetComponent<MeshRenderer>();
+            if (view != null) view.enabled = realGroundTicks == 0;
+            if (collider != null) collider.enabled = realGroundTicks < RealGroundConfirmTicks;
+        }
 
         // Baut oder erneuert das Hoehenfeld unter dem Booster. Rueckgabe: liegt jetzt Boden dort?
         public bool Refresh(Vessel v, double time, double clearance)
@@ -51,14 +86,14 @@ namespace BoosterWatch
             {
                 if (!Create()) return false;
             }
-            else if (!GroundPatchPolicy.MustRebuild(Vector3d.Distance(position, centre), time - builtAt, clearance))
+            else if (!GroundPatchPolicy.MustRebuild(HorizontalTravel(position), time - builtAt, clearance))
             {
                 // Der Booster ist kaum gezogen und der Boden ist noch frisch: nichts zu tun.
                 return true;
             }
 
             Vector3d up = (position - body.position).normalized;
-            double radius = pqs.GetSurfaceHeight(up);
+            double radius = SurfaceRadius(up);
             if (double.IsNaN(radius) || radius <= 0) { Dispose(); return false; }
 
             Vector3d north = Vector3.ProjectOnPlane(body.transform.up, up).normalized;
@@ -66,6 +101,12 @@ namespace BoosterWatch
             Vector3d east = Vector3d.Cross(north, up).normalized;
             centre = body.position + up * radius;
             SurfaceAltitude = radius - body.Radius;
+            centreLocal = pqs.transform.InverseTransformPoint((Vector3)centre);
+            // Zuerst den Wurzelknoten an die neue Mitte setzen, DANN die Punkte in seinen Raum
+            // umrechnen. Andersherum lag das Netz um die Strecke zwischen alter und neuer Mitte
+            // daneben - beim ersten Bau um den ganzen Planetenradius (Wurzel noch im Planetenmittelpunkt).
+            root.transform.localPosition = centreLocal;
+            builtFromLocal = pqs.transform.InverseTransformPoint((Vector3)position);
             // Guertel und Hosentraeger: ueber Wasser wird nichts gebaut, egal wie der Aufrufer
             // entschieden hat. Ein Netz auf dem Meeresboden waere hunderte Meter zu tief.
             if (body.ocean && SurfaceAltitude < 0) { Dispose(); return false; }
@@ -78,7 +119,7 @@ namespace BoosterWatch
                     double du, dv;
                     GroundField.Offset(Resolution, HalfSize, i, j, out du, out dv);
                     Vector3d direction = (centre + east * du + north * dv - body.position).normalized;
-                    double height = pqs.GetSurfaceHeight(direction);
+                    double height = SurfaceRadius(direction);
                     Vector3d point = body.position + direction * height;
                     vertices[j * side + i] = root.transform.InverseTransformPoint((Vector3)point);
                     uv[j * side + i] = new Vector2(i / (float)(side - 1), j / (float)(side - 1));
@@ -87,12 +128,12 @@ namespace BoosterWatch
 
             // Die Rechnung laeuft in der lokalen Ebene des Wurzelknotens; damit bleibt sie auch
             // dann genau, wenn der Planet weit vom Weltursprung entfernt liegt.
-            root.transform.localPosition = pqs.transform.InverseTransformPoint((Vector3)centre);
             mesh.vertices = vertices;
             mesh.uv = uv;
             mesh.triangles = indices;
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
+            ApplyVisibility();
             collider.sharedMesh = null;
             collider.sharedMesh = mesh;
             builtAt = time;
@@ -115,6 +156,20 @@ namespace BoosterWatch
             return true;
         }
 
+        // Radius der prozeduralen Oberflaeche in einer WELT-Richtung.
+        //
+        // PQS.GetSurfaceHeight erwartet eine Richtung im Koerpersystem des Planeten
+        // (CelestialBody.GetRelSurfaceNVector), keine Weltrichtung. Mit der Weltrichtung fragte der
+        // Patch bis 0.9.39 einen anderen Punkt des Planeten ab - um die aktuelle Drehung versetzt:
+        // im Flug von 0.9.38 "Hoehe -1055 m, Wasser ja" unter einem Booster, der ueber 788 m hohem
+        // Land flog, und in 0.9.39 gar kein Bau mehr, weil die Wasser-Sperre griff. Derselbe Weg
+        // ueber Breite und Laenge wie in TrackedBooster.Measure.
+        private double SurfaceRadius(Vector3d worldDirection)
+        {
+            Vector3d point = body.position + worldDirection * body.Radius;
+            return pqs.GetSurfaceHeight(body.GetRelSurfaceNVector(body.GetLatitude(point), body.GetLongitude(point)));
+        }
+
         private bool Create()
         {
             try
@@ -131,7 +186,11 @@ namespace BoosterWatch
                 MeshFilter filter = meshObject.AddComponent<MeshFilter>();
                 filter.sharedMesh = mesh;
                 MeshRenderer renderer = meshObject.AddComponent<MeshRenderer>();
-                renderer.sharedMaterial = pqs.surfaceMaterial != null ? pqs.surfaceMaterial : FallbackMaterial();
+                // Bewusst NICHT das Gelaendematerial: KSPs Terrain-Shader (mit Parallax erst recht)
+                // braucht Daten, die ein zur Laufzeit gebautes Netz nicht hat, und rendert es dann
+                // gar nicht - der Booster stand auf einer unsichtbaren Flaeche.
+                if (sharedMaterial == null) sharedMaterial = FallbackMaterial();
+                renderer.sharedMaterial = sharedMaterial;
                 renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 renderer.receiveShadows = true;
                 int layer = LayerMask.NameToLayer("Local Scenery");
@@ -148,6 +207,15 @@ namespace BoosterWatch
                 Dispose();
                 return false;
             }
+        }
+
+        // Waagerechte Strecke seit dem letzten Bau (PQS-Raum, Ursprung im Planetenmittelpunkt).
+        private float HorizontalTravel(Vector3d position)
+        {
+            Vector3 now = pqs.transform.InverseTransformPoint((Vector3)position);
+            Vector3 moved = now - builtFromLocal;
+            Vector3 radial = builtFromLocal.normalized;
+            return (moved - Vector3.Dot(moved, radial) * radial).magnitude;
         }
 
         private static Material FallbackMaterial()
@@ -170,6 +238,7 @@ namespace BoosterWatch
             if (mesh != null) { UnityEngine.Object.Destroy(mesh); mesh = null; }
             builtAt = double.NegativeInfinity;
             SurfaceAltitude = 0;
+            realGroundTicks = 0;
         }
     }
 }
