@@ -67,7 +67,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Automation test compilation failed.' }
 & $automationExe
 if ($LASTEXITCODE -ne 0) { throw 'Automation tests failed.' }
 $settingsExe = Join-Path $testDir 'KspSettingsTests.exe'
-& $compiler /nologo /target:exe ('/out:' + $settingsExe) ('/reference:' + (Join-Path $managed 'Assembly-CSharp.dll')) ('/reference:' + (Join-Path $managed 'UnityEngine.dll')) ('/reference:' + (Join-Path $managed 'UnityEngine.CoreModule.dll')) (Join-Path $PSScriptRoot 'src\Settings.cs') (Join-Path $PSScriptRoot 'src\RecoveryPolicy.cs') (Join-Path $PSScriptRoot 'src\VesselRangeTransition.cs') (Join-Path $PSScriptRoot 'src\RecoveryJournal.cs') (Join-Path $PSScriptRoot 'src\StagePolicy.cs') (Join-Path $PSScriptRoot 'tests\KspSettingsTests.cs')
+& $compiler /nologo /target:exe ('/out:' + $settingsExe) ('/reference:' + (Join-Path $managed 'Assembly-CSharp.dll')) ('/reference:' + (Join-Path $managed 'UnityEngine.dll')) ('/reference:' + (Join-Path $managed 'UnityEngine.CoreModule.dll')) (Join-Path $PSScriptRoot 'src\Settings.cs') (Join-Path $PSScriptRoot 'src\HeatPolicy.cs') (Join-Path $PSScriptRoot 'src\RecoveryPolicy.cs') (Join-Path $PSScriptRoot 'src\VesselRangeTransition.cs') (Join-Path $PSScriptRoot 'src\RecoveryJournal.cs') (Join-Path $PSScriptRoot 'src\StagePolicy.cs') (Join-Path $PSScriptRoot 'tests\KspSettingsTests.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Settings test compilation failed.' }
 & $settingsExe $managed (Join-Path $testDir 'settings-tests')
 if ($LASTEXITCODE -ne 0) { throw 'Settings and range tests failed.' }
@@ -90,6 +90,12 @@ $liftExe = Join-Path $testDir 'LiftPolicyTests.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Lift tests did not compile.' }
 & $liftExe
 if ($LASTEXITCODE -ne 0) { throw 'Lift tests failed.' }
+# Wiedereintrittsburn gegen ein Waermemodell in KSPs Form. Reine Logik.
+$entryExe = Join-Path $testDir 'EntryBurnTests.exe'
+& $compiler /nologo /target:exe ('/out:' + $entryExe) (Join-Path $PSScriptRoot 'src\EntryBurnPolicy.cs') (Join-Path $PSScriptRoot 'tests\EntryBurnTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Entry burn tests did not compile.' }
+& $entryExe
+if ($LASTEXITCODE -ne 0) { throw 'Entry burn tests failed.' }
 
 $touchdownExe = Join-Path $testDir 'TouchdownTests.exe'
 & $compiler /nologo /target:exe ('/out:' + $touchdownExe) (Join-Path $PSScriptRoot 'src\RecoveryPolicy.cs') (Join-Path $PSScriptRoot 'src\TouchdownPolicy.cs') (Join-Path $PSScriptRoot 'tests\TouchdownTests.cs')

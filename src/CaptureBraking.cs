@@ -69,6 +69,19 @@ namespace BoosterWatch.Guidance
                     2 * lateralDistance / Math.Max(1, sink + targetSink))
                 : FinalLateralSeconds;
             double wantedSide = Math.Max(0, side / lateralTime - dragSide);
+            // Nie schraeger, als sich rechtzeitig wieder aufrichten laesst. Beim Aufrichten mit der
+            // Drehrate w schiebt der Schub die Stufe weiter seitwaerts, um etwa a * theta^2 / (2 w).
+            // Die Schraeglage theta = Wurzel(2 w v / a) nimmt die Seitenfahrt v deshalb genau bis
+            // null heraus, waehrend sich die Stufe aufrichtet. Flug vom 26.09.2026, 08:35: bei 43 m
+            // war die Seitenfahrt weg (2,6 m/s), die Stufe hing aber noch 28 Grad schief, und beim
+            // Aufrichten schob sie sich mit 12 m/s in die Gegenrichtung.
+            double turnRate = config.Control.TurnRateDegrees * Math.PI / 180;
+            double push = Math.Max(wantedUp, 0.5 * gravity);
+            if (turnRate > 0 && push > 0)
+            {
+                double lean = Math.Sqrt(2 * turnRate * side / push);
+                if (lean < 1.2) wantedSide = Math.Min(wantedSide, wantedUp * Math.Tan(lean));
+            }
             if (lateralDistance <= 0.5) wantedSide = Math.Min(wantedSide, wantedUp * FinalLeanTangent);
             double wanted = Math.Sqrt(wantedUp * wantedUp + wantedSide * wantedSide);
 

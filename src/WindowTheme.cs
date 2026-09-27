@@ -14,6 +14,11 @@ namespace BoosterWatch
         public readonly Color Secondary = new Color(0.58f, 0.65f, 0.73f);
         public GUIStyle Window, Panel, Inset, Title, Heading, Body, Muted, Small, Value, CompactValue, Button, ActiveButton, Field, Tab, ActiveTab, Badge;
         public GUIStyle FuelTrack, FuelFill, FuelLow;
+        // Rote Warnung im Fenster (z. B. Steuerkraft reicht nicht zum Gleiten).
+        public GUIStyle Warning, ResultGood, ResultBad, ResultNeutral;
+        public GUIStyle ResultPanel;
+        public readonly Color Good = new Color(0.40f, 0.89f, 0.56f);
+        public readonly Color Alarm = new Color(1f, 0.33f, 0.28f);
         public WindowTheme()
         {
             try { font = Font.CreateDynamicFontFromOSFont("Segoe UI", 14); } catch { font = null; }
@@ -40,6 +45,11 @@ namespace BoosterWatch
             Tab = Control(new Color(0.075f, 0.095f, 0.125f), Secondary);
             ActiveTab = Control(new Color(0.12f, 0.22f, 0.24f), Accent);
             Badge = Label(11, Accent, FontStyle.Bold); Badge.alignment = TextAnchor.MiddleRight;
+            Warning = Label(16, Alarm, FontStyle.Bold); Warning.wordWrap = true;
+            ResultGood = Label(22, Good, FontStyle.Bold); ResultGood.alignment = TextAnchor.MiddleCenter;
+            ResultBad = Label(22, Alarm, FontStyle.Bold); ResultBad.alignment = TextAnchor.MiddleCenter;
+            ResultNeutral = Label(22, Secondary, FontStyle.Bold); ResultNeutral.alignment = TextAnchor.MiddleCenter;
+            ResultPanel = Surface(new Color(0.03f, 0.045f, 0.065f, 0.88f), 8);
         }
         private GUIStyle Label(int size, Color color, FontStyle weight = FontStyle.Normal)
         {

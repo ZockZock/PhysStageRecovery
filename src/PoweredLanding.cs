@@ -240,7 +240,16 @@ namespace BoosterWatch
         // One tick of the predictive law. The adapter gathers what KSP knows, the law decides, and
         // the answer is written back into the FlightCtrlState the game is about to apply.
         private string loggedGlideEnd = "";
+        private bool authorityReported;
+        // Die Stufe konnte den Gleitwinkel nicht halten (DescentGuidance.GlideAuthorityLacking).
+        public bool GlideAuthorityLacking { get { return descent != null && descent.GlideAuthorityLacking; } }
+        public double ReachedGlideDegrees { get { return descent != null ? descent.ReachedGlideDegrees : double.NaN; } }
+        public double CommandedGlideDegrees { get { return descentConfig != null ? descentConfig.Glide.AngleDegrees : double.NaN; } }
         private readonly FuelTrim trim = new FuelTrim();
+        // Hitzemessung des Boosters (TrackedBooster) und der Wiedereintrittsburn, der sie nutzt.
+        public HeatGuard Heat;
+        private readonly EntryBurn entryBurn = new EntryBurn();
+        public EntryBurn EntryBurn { get { return entryBurn; } }
         private void DrivePredictive(FlightCtrlState s, MechJebPort.VesselState state,
             List<ModuleEngines> engines, bool unsupported)
         {
@@ -287,7 +296,10 @@ namespace BoosterWatch
             // The law takes mass in kilogrammes and the adapter measures tonnes, which is the unit
             // KSP works in everywhere else. The conversion belongs here, at the one place the two
             // meet, so the forecast's drag, its mass flow and the tests' harness all agree.
+            // Waehrend des Wiedereintrittsburns haelt die Stufe gegen die Bahn statt zu gleiten.
+            descent.HoldGlide = entryBurn.Active;
             GuidanceStep step = descent.Step(descentState, 1000 * adapter.Mass, TimeWarp.fixedDeltaTime, aligned);
+            entryBurn.Step(vessel, settings, Heat, adapter, descent, descentConfig, step, state.LimitedMaxThrustAcceleration);
             // Waehrend des Gleitens den Treibstoff vom Triebwerk weg pumpen (FuelTrim).
             if (step.Valid && step.Gliding && descentConfig.Glide.PumpFuel)
                 trim.Pump(vessel, usable.Count > 0 ? usable : engines, TimeWarp.fixedDeltaTime, vessel.id.ToString());
@@ -298,6 +310,14 @@ namespace BoosterWatch
                     Debug.Log("[PhysStageRecovery] Gleiten beendet " + vessel.id + ": " + loggedGlideEnd
                         + " bei " + clearance.ToString("0") + " m, Anstellwinkel "
                         + adapter.AngleOfAttack.ToString("0.0") + " Grad.");
+                // Gross und rot: der Spieler soll sofort sehen, woran es lag.
+                if (descent.GlideAuthorityLacking && !authorityReported)
+                {
+                    authorityReported = true;
+                    ScreenMessages.PostScreenMessage("<size=30><b>" + Loc.Get("#PSR_Screen_GlideAuthority", vessel.vesselName,
+                        descent.ReachedGlideDegrees.ToString("0"), descentConfig.Glide.AngleDegrees.ToString("0"))
+                        + "</b></size>", 12, ScreenMessageStyle.UPPER_CENTER, new Color(1f, 0.25f, 0.2f));
+                }
             }
             if (!step.Valid)
             {
@@ -330,6 +350,9 @@ namespace BoosterWatch
             core.Attitude.attitudeTo(axis, AttitudeReference.INERTIAL, descent);
             core.Attitude.Drive(s);
             s.mainThrottle = (float)step.Throttle;
+            // Wiedereintrittsburn: nur im antriebslosen Sinkflug, die Lage ist dann schon gegen die Bahn.
+            if (entryBurn.Throttle > 0 && step.Phase == DescentPhase.Entry)
+                s.mainThrottle = Math.Max(s.mainThrottle, (float)entryBurn.Throttle);
         }
 
         // Early exits of DrivePredictive: keep their status line (the caller would overwrite it) and
@@ -406,7 +429,9 @@ namespace BoosterWatch
                         step.Throttle, ThrottleCutReason,
                         step.Up, step.East, step.North, AimToRetrogradeDegrees, AttitudeError,
                         ActualAcceleration, engines.Count, ignited, flameout ? 1 : 0, EngineThrottle, EngineFlameout ? 1 : 0,
-                        vessel.LandedOrSplashed ? 1 : 0, descent.IgnitionReason, Status));
+                        vessel.LandedOrSplashed ? 1 : 0, descent.IgnitionReason, Status,
+                        Heat != null ? Heat.ReentryRatio : double.NaN,
+                        entryBurn.Policy != null ? entryBurn.Policy.Predicted : double.NaN, entryBurn.Active ? 1 : 0));
             }
             catch (Exception)
             {

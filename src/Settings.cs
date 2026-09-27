@@ -17,9 +17,21 @@ namespace BoosterWatch
         public bool ShowDiagnostics;
         public bool HasBehaviorSettings { get; private set; }
         public float CameraDistance = 65, CameraHeading = 35, CameraPitch = 12;
-        // On by default: an aligned booster presents its smallest cross-section and would
-        // otherwise be destroyed by reentry heat before the landing autopilot can fly.
-        public bool HeatImmune = true;
+        // Schwierigkeitsgrad der Wiedereintrittshitze (HeatPolicy). Standard Leicht: ein ausgerichteter
+        // Booster zeigt dem Luftstrom seinen kleinsten Querschnitt und verglueht sonst, bevor der
+        // Landeautomat fliegen kann.
+        public HeatMode HeatMode = HeatMode.Easy;
+        // Der alte Schalter (bis 0.9.48 "heatImmune"): an = Leicht, aus = Realistisch.
+        public bool HeatImmune
+        {
+            get { return HeatMode == HeatMode.Easy; }
+            set { HeatMode = value ? HeatMode.Easy : HeatMode.Realistic; }
+        }
+        // Wiedereintrittsburn (EntryBurnPolicy): bremst nur, wenn die Hitze sonst die Grenze erreicht.
+        // Aus als Standard; wirkt nur in den Graden Normal und Realistisch.
+        public bool EntryBurn;
+        // Die Missionskontrolle (ReconnectScene) mit den Stimmen der Tutorial-Kerbals. Aus als Standard.
+        public bool MissionControlVoice;
         public int LastAutoStage = 0;
         public double AutoStageHeight = 5000, LandingSpeed = 0.5;
         // What the predictive law aims for at the ground.
@@ -45,8 +57,9 @@ namespace BoosterWatch
         private string filePath;
         public static string Path { get { return System.IO.Path.Combine(KSPUtil.ApplicationRootPath, "GameData/PhysStageRecovery/PluginData/settings.cfg"); } }
 
-        // Version of the file layout. 8: guidanceMode and reserveHudX/Y removed.
-        public const int CurrentVersion = 8;
+        // Version of the file layout. 8: guidanceMode and reserveHudX/Y removed. 9: heatImmune
+        // becomes heatMode (easy/normal/realistic), entryBurn added.
+        public const int CurrentVersion = 9;
 
         public static Settings Load() { return Load(Path); }
 
@@ -84,7 +97,11 @@ namespace BoosterWatch
                 s.CameraDistance = (float)Read(n, "cameraDistance", 65, 8, 180);
                 s.CameraHeading = (float)Read(n, "cameraHeading", 35, -180, 180);
                 s.CameraPitch = (float)Read(n, "cameraPitch", 12, -80, 80);
-                if (bool.TryParse(n.GetValue("heatImmune"), out b)) s.HeatImmune = b;
+                HeatMode mode;
+                if (HeatPolicy.TryParse(n.GetValue("heatMode"), out mode)) s.HeatMode = mode;
+                else if (bool.TryParse(n.GetValue("heatImmune"), out b)) s.HeatImmune = b;
+                if (bool.TryParse(n.GetValue("entryBurn"), out b)) s.EntryBurn = b;
+                if (bool.TryParse(n.GetValue("missionControlVoice"), out b)) s.MissionControlVoice = b;
                 s.LastAutoStage = (int)Read(n, "lastAutoStage", 0, 0, 100);
                 s.AutoStageHeight = Read(n, "autoStageHeight", 5000, 50, 70000);
                 s.LandingSpeed = Read(n, "landingSpeed", 0.5, 0.5, 5);
@@ -142,7 +159,11 @@ namespace BoosterWatch
                 n.SetValue("autoOpenWindow", AutoOpenWindow.ToString(), true);
                 n.SetValue("showDiagnostics", ShowDiagnostics.ToString(), true);
                 Set(n, "cameraDistance", CameraDistance); Set(n, "cameraHeading", CameraHeading); Set(n, "cameraPitch", CameraPitch);
-                n.SetValue("heatImmune", HeatImmune.ToString(), true);
+                // Seit 0.9.49 ein Grad statt eines Schalters.
+                n.RemoveValues("heatImmune");
+                n.SetValue("heatMode", HeatPolicy.Key(HeatMode), true);
+                n.SetValue("entryBurn", EntryBurn.ToString(), true);
+                n.SetValue("missionControlVoice", MissionControlVoice.ToString(), true);
                 Set(n, "lastAutoStage", LastAutoStage); Set(n, "autoStageHeight", AutoStageHeight);
                 Set(n, "landingSpeed", LandingSpeed);
                 Set(n, "terminalAltitude", TerminalAltitude);

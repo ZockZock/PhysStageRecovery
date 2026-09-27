@@ -84,6 +84,8 @@ internal sealed class GuidanceRunner
     // Gleitflug der "echten" Stufe: Cd*A und Auftrieb, solange die Regelung gleiten laesst (NaN = kann
     // nicht gleiten, bleibt beim normalen Wert).
     public double PlantGlideDragArea = double.NaN, PlantGlideLiftRatio;
+    // Anstellwinkel, den die Stufe beim befohlenen Gleiten wirklich erreicht (NaN = nicht gemeldet).
+    public double PlantGlideAngle = double.NaN;
     private bool Gliding { get { return !Lit && Last.Valid && Last.Gliding && !double.IsNaN(PlantGlideDragArea); } }
     public double GlideSeconds;
     public double PlantDragArea
@@ -198,6 +200,8 @@ internal sealed class GuidanceRunner
             DragAcceleration = DragAt(Clearance, Math.Sqrt(Sink * Sink + Lateral * Lateral)),
             LiftRatio = ReportLift ? PlantLift : 0,
             LiftKnown = ReportLift && PlantLift != 0,
+            AngleOfAttack = double.IsNaN(PlantGlideAngle) ? double.NaN
+                : Last.Valid && Last.Gliding && !Lit ? PlantGlideAngle : 0,
             AvailableDeltaV = 0,
             // Wie der Adapter: die Brenndauer bis die Tanks leer sind. Mit 0 rechnete die Vorhersage
             // mit 90 % der Masse als Treibstoff und hielt leere Stufen fuer landefaehig.
@@ -1150,7 +1154,9 @@ internal static class GuidanceTests
         True(runner.Landed, "aufgesetzt");
         // Vorher 7,9 m/s bei 45 m - die Stufe lehnte sich bis in die letzten Meter.
  Check(lateralAt45 < 3, "Seitenfahrt bei 45 m " + lateralAt45.ToString("0.00") + " m/s");
-        Check(lateralAt25 < 1.2, "Seitenfahrt bei 25 m " + lateralAt25.ToString("0.00") + " m/s");
+        // Seit 0.9.50 richtet sich die Stufe im Takt ihrer Drehrate auf (CaptureBraking), der letzte
+        // Rest geht deshalb etwas langsamer weg: 1,8 statt 1,2 m/s bei 25 m, aufgesetzt unter 1,5.
+        Check(lateralAt25 < 2, "Seitenfahrt bei 25 m " + lateralAt25.ToString("0.00") + " m/s");
         Console.WriteLine("     groesster Lagefehler " + runner.MaxAttitudeError.ToString("0.0") + " Grad");
         Check(runner.TouchdownSpeed <= 8 && runner.TouchdownLateral < 1.5,
             "Aufsetzen " + runner.TouchdownSpeed.ToString("0.0") + " m/s, seitlich " + runner.TouchdownLateral.ToString("0.00"));
@@ -1177,6 +1183,69 @@ internal static class GuidanceTests
         True(runner.Landed, "aufgesetzt");
         Check(Math.Abs(runner.TouchdownLateral) < 3, "seitlich beim Aufsetzen " + runner.TouchdownLateral.ToString("0.00") + " m/s (Flug: 6,2)");
         Check(maxReverse < 2, "keine Gegenfahrt ueber 2 m/s unter 60 m (" + maxReverse.ToString("0.00") + ")");
+    }
+
+    // Flug vom 26.09.2026, 08:35 (0.9.49): bei 377 m 88 m/s Sinken und 83 m/s seitlich, Zielhoehe 10 m.
+    // Bis 63 m lag die Stufe 25 Grad schraeg, bei 43 m war die Seitenfahrt fast weg (2,6 m/s) - aber
+    // die Stufe hing noch 28 Grad schief und brauchte 1,5 s zum Aufrichten. Dabei schob sie sich mit
+    // bis zu 12 m/s in die Gegenrichtung und setzte mit 6,7 m/s seitlich auf.
+    private static void TestLeanUnwoundInTime()
+    {
+        foreach (double turn in new[] { 10.0, 17.0 })
+        {
+            Console.WriteLine("-- 377 m, 88 m/s, 83 m/s seitlich, Zielhoehe 10 m, Lage dreht " + turn + " Grad/s");
+            GuidanceRunner runner = MakeRunner(377, 88, 83, 1500000);
+            runner.Mass = 20000; runner.DryMass = 15000; runner.World.DragArea = 1.0; runner.ReportFuel = true;
+            runner.Config.Predictor.CaptureAltitude = 10; runner.Config.Terminal.Altitude = 150;
+            runner.TurnRateDegrees = turn;
+            double maxReverse = 0;
+            for (int i = 0; i < 6000 && !runner.Landed; i++)
+            {
+                runner.Step(0.05);
+                if (runner.Clearance < 60) maxReverse = Math.Max(maxReverse, -runner.Lateral);
+            }
+            Console.WriteLine("     " + runner.Trace() + " Gegenfahrt=" + maxReverse.ToString("0.00")
+                + " Lagefehler=" + runner.MaxAttitudeError.ToString("0.0"));
+            True(runner.Landed, "aufgesetzt");
+            Check(Math.Abs(runner.TouchdownLateral) < 2, "seitlich beim Aufsetzen " + runner.TouchdownLateral.ToString("0.00") + " m/s (Flug: 6,7)");
+            Check(maxReverse < 2, "keine Gegenfahrt ueber 2 m/s unter 60 m (" + maxReverse.ToString("0.00") + ")");
+        }
+    }
+
+    // Fluege vom 26.09.2026, 09:16 und 09:23 ohne Steuerflaechen: befohlen 35 Grad, erreicht 0,2-3 Grad,
+    // der Widerstand blieb der rueckwaerts. Das Gleiten lief bis zur Mindesthoehe von 2 km, die Stufe
+    // schlug mit 650 m/s auf. Jetzt endet das Gleiten, sobald klar ist, dass der Winkel nicht erreicht
+    // wird, und die Zuendung wird normal geplant.
+    private static void TestGlideWithoutAuthority()
+    {
+        Console.WriteLine("-- Gleiten ohne Steuerkraft (erreicht 2 Grad statt 35)");
+        GuidanceRunner runner = MakeRunner(32000, 800, 900, 1500000);
+        runner.Mass = 26000; runner.DryMass = 15000; runner.World.DragArea = 0.7; runner.ReportFuel = true;
+        runner.PlantGlideDragArea = 0.8; runner.PlantGlideLiftRatio = 0; runner.PlantGlideAngle = 2;
+        runner.Config.Predictor.CaptureAltitude = 20;
+        bool glided = false;
+        for (int i = 0; i < 20000 && !runner.Landed; i++)
+        {
+            runner.Step(0.05);
+            if (runner.Last.Valid && runner.Last.Gliding) glided = true;
+        }
+        Console.WriteLine("     " + runner.Trace() + " geglitten=" + glided + " Grund=" + runner.Guidance.GlideEndReason);
+        True(runner.Guidance.GlideAuthorityLacking, "Steuerkraft-Mangel erkannt");
+        Check(runner.Landed && runner.TouchdownSpeed < 10, "aufgesetzt mit " + runner.TouchdownSpeed.ToString("0.0") + " m/s (Flug: 650)");
+    }
+
+    // Mit genug Steuerkraft (12 Grad erreicht, wie mit Steuerflaechen) bleibt es beim Gleiten.
+    private static void TestGlideWithAuthorityKeepsGliding()
+    {
+        Console.WriteLine("-- Gleiten mit Steuerflaechen (erreicht 12 Grad)");
+        GuidanceRunner runner = MakeRunner(32000, 800, 900, 1500000);
+        runner.Mass = 26000; runner.DryMass = 15000; runner.World.DragArea = 0.7; runner.ReportFuel = true;
+        runner.PlantGlideDragArea = 6; runner.PlantGlideLiftRatio = 0.1; runner.PlantGlideAngle = 12;
+        runner.Config.Predictor.CaptureAltitude = 20;
+        for (int i = 0; i < 20000 && !runner.Landed; i++) runner.Step(0.05);
+        Console.WriteLine("     " + runner.Trace() + " Grund=" + runner.Guidance.GlideEndReason);
+        True(!runner.Guidance.GlideAuthorityLacking, "kein Fehlalarm");
+        Check(runner.Landed && runner.TouchdownSpeed < 10, "aufgesetzt mit " + runner.TouchdownSpeed.ToString("0.0") + " m/s");
     }
 
     // ---------------------------------------------------------------- helpers
@@ -1236,6 +1305,7 @@ internal static class GuidanceTests
             ThrustAcceleration = thrust,
             AirDensity = 0,
             DragCoefficient = 1,
+            AngleOfAttack = double.NaN,
             Valid = true
         };
     }
@@ -1374,6 +1444,9 @@ internal static class GuidanceTests
         TestFinnedStageGlidesInsteadOfBurning();
         TestDriftGoneBeforeUprightWithLowCapture();
         TestLateArrivalWithSlowAttitude();
+        TestLeanUnwoundInTime();
+        TestGlideWithoutAuthority();
+        TestGlideWithAuthorityKeepsGliding();
         Console.WriteLine(failures == 0 ? "Alle Guidance-Tests bestanden."
             : failures + " Guidance-Tests fehlgeschlagen.");
         return failures == 0 ? 0 : 1;

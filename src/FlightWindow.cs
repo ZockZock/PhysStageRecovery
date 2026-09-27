@@ -70,9 +70,31 @@ namespace BoosterWatch
             if (!resizing) cameraFeed.SetViewport(w * GUI.matrix.m00, imageHeight * GUI.matrix.m11);
             GUI.Box(cameraViewport, "", windowTheme.Inset);
             bool live = b.Vessel != null && b.Vessel.loaded && !b.Vessel.packed && !b.Finished;
-            if (cameraEnabled && cameraFeed.Texture != null && cameraFeed.HasFrame && (live || b.Finished))
+            // Kein Bild, weil der Booster auf Schienen fliegt (Zeitraffer) oder noch ohne Physik ist: die
+            // Missionskontrolle versucht, die Verbindung wiederherzustellen.
+            bool reconnecting = cameraEnabled && !faulted && !b.Finished && !live && cameraFeed.Error == null;
+            // Wechsel zwischen Livebild und Missionskontrolle (und zwischen Boostern) mit Bildrauschen: bis
+            // zur Mitte rauscht das alte Bild zu, danach rauscht das neue auf.
+            float now = Time.unscaledTime;
+            string mode = b.Id + (reconnecting ? "/mc" : "/live");
+            if (mode != shownMode && mode != targetMode)
+            {
+                fromReconnect = TransitionProgress(now) < 0.5f ? shownReconnect : targetReconnect;
+                shownMode = TransitionProgress(now) < 0.5f ? shownMode : targetMode;
+                targetMode = mode; targetReconnect = reconnecting; switchTime = now;
+                shownReconnect = fromReconnect;
+            }
+            float progress = TransitionProgress(now);
+            if (progress >= 1 && shownMode != targetMode) { shownMode = targetMode; shownReconnect = targetReconnect; }
+            bool showReconnect = progress < 0.5f ? shownReconnect : targetReconnect;
+            if (!showReconnect && cameraEnabled && cameraFeed.Texture != null && cameraFeed.HasFrame && (live || b.Finished || progress < 0.5f))
                 GUI.DrawTexture(cameraViewport, cameraFeed.Texture, ScaleMode.ScaleToFit, false);
-            string overlay = faulted ? notice : b.Finished ? Loc.Get("#PSR_Window_TrackingDone")
+            if (showReconnect) DrawMissionControl(cameraViewport);
+            float snow = progress < 1 ? 1 - Mathf.Abs(progress * 2 - 1) : 0;
+            if (snow > 0) DrawSnow(cameraViewport, Mathf.Clamp01(snow * 1.4f), now);
+            reconnecting = showReconnect;
+            bool result = b.Finished && b.Result != BoosterResult.None && !faulted;
+            string overlay = reconnecting || result ? "" : faulted ? notice : b.Finished ? Loc.Get("#PSR_Window_TrackingDone")
                 : !cameraEnabled ? Loc.Get("#PSR_Window_CameraOff")
                 : cameraFeed.Error ?? (!live ? Loc.Get("#PSR_Window_WaitingVideo")
                     : cameraFeed.HasFrame ? "" : Loc.Get("#PSR_Window_ConnectingCamera"));
@@ -81,8 +103,9 @@ namespace BoosterWatch
                 GUI.Box(new Rect(28, 220, w - 20, 42), "", windowTheme.Panel);
                 GUI.Label(new Rect(40, 220, w - 44, 42), overlay, windowTheme.Body);
             }
-            else
+            else if (!reconnecting && !result)
                 GUI.Label(new Rect(32, 222, 105, 20), "● LIVE", windowTheme.Badge);
+            if (result) DrawResult(b, cameraViewport);
             Vector2 mouse = new Vector2(Input.mousePosition.x - window.x, Screen.height - Input.mousePosition.y - window.y);
             if (cameraEnabled && live && cameraViewport.Contains(mouse))
             {
@@ -103,8 +126,17 @@ namespace BoosterWatch
             string state = PrimaryStatus(b);
             if (!faulted && enabledMod && !b.Finished && b.Sample.PhysicsActive
                 && b.Landing.OwnsControl)
-                state = Loc.Get(Guidance.DescentPhases.Tag(b.Landing.Phase));
-            GUI.Label(new Rect(20, y, w - 155, 28), new GUIContent(Loc.Get("#PSR_Window_State", state), state), windowTheme.Heading);
+                state = Loc.Get(b.Landing.EntryBurn.Active ? "#PSR_Phase_EntryBurn" : Guidance.DescentPhases.Tag(b.Landing.Phase));
+            // Hitze des heissesten Teils, sobald sie zaehlt: im Grad Leicht als Anteil an der Grenze, die
+            // ohne Schutz gaelte.
+            if (!b.Finished && b.Sample.PhysicsActive && RecoveryPolicy.Finite(b.Heat.Ratio) && b.Heat.Ratio >= 0.3)
+                state += "  ·  " + Loc.Get("#PSR_Window_Heat", (100 * b.Heat.Ratio).ToString("0"));
+            bool authority = !b.Finished && b.Landing.GlideAuthorityLacking;
+            if (authority) state = Loc.Get("#PSR_Window_GlideAuthority");
+            GUI.Label(new Rect(20, y, w - 155, 28), new GUIContent(authority ? state : Loc.Get("#PSR_Window_State", state),
+                authority ? Loc.Get("#PSR_Window_GlideAuthorityHint", b.Landing.ReachedGlideDegrees.ToString("0"),
+                    b.Landing.CommandedGlideDegrees.ToString("0")) : state),
+                authority ? windowTheme.Warning : windowTheme.Heading);
             double throttle = b.Finished ? 0 : validReadout ? b.Readout.Throttle : double.NaN;
             GUI.Label(new Rect(window.width - 166, y, 146, 28), new GUIContent(
                 Loc.Get("#PSR_Window_Throttle", RecoveryPolicy.Finite(throttle) ? (100 * throttle).ToString("0") : "—"),
@@ -186,6 +218,143 @@ namespace BoosterWatch
                 Loc.Get("#PSR_Help_Warp")
             };
         }
+        // Missionskontrolle im Kamerafeld: links der Kerbal (oder der gezeichnete Kontrollraum), rechts
+        // die Anzeige mit Signalbalken und Status.
+        // Uebergang: Dauer des Rauschens [s] und der Zustand dazu.
+        private const float SnowSeconds = 0.9f;
+        private string shownMode = "", targetMode = "";
+        private bool shownReconnect, targetReconnect, fromReconnect;
+        private float switchTime = -10;
+        private Texture2D snowTexture;
+        private Color32[] snowPixels;
+        private int snowFrame = -1;
+        private float TransitionProgress(float now) { return Mathf.Clamp01((now - switchTime) / SnowSeconds); }
+
+        // Fernsehschnee: Zufallsgrau, im Takt von ~30 Bildern pro Sekunde neu, mit ein paar hellen Zeilen.
+        private void DrawSnow(Rect area, float alpha, float now)
+        {
+            const int w = 160, h = 90;
+            if (snowTexture == null)
+            {
+                snowTexture = new Texture2D(w, h, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Repeat };
+                snowPixels = new Color32[w * h];
+            }
+            int frame = (int)(now * 30);
+            if (frame != snowFrame)
+            {
+                snowFrame = frame;
+                uint seed = (uint)frame * 2654435761u + 12345u;
+                int bright = (int)(seed >> 8) % h;
+                for (int y = 0; y < h; y++)
+                {
+                    int lift = Math.Abs(y - bright) < 2 ? 70 : 0;
+                    for (int x = 0; x < w; x++)
+                    {
+                        seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+                        int g = (int)(seed & 0xFF) * 3 / 4 + 20 + lift;
+                        if (g > 255) g = 255;
+                        snowPixels[y * w + x] = new Color32((byte)g, (byte)g, (byte)(g * 0.95f + 8), 255);
+                    }
+                }
+                snowTexture.SetPixels32(snowPixels);
+                snowTexture.Apply(false);
+            }
+            Color keep = GUI.color;
+            GUI.color = new Color(1, 1, 1, alpha);
+            GUI.DrawTexture(area, snowTexture, ScaleMode.StretchToFill, false);
+            GUI.color = keep;
+        }
+
+        private void DrawMissionControl(Rect area)
+        {
+            float now = Time.unscaledTime;
+            // So gross wie das Livebild: die Figur wird in genau der Groesse des Kamerafelds gefilmt.
+            bool kerbal = reconnect.Show(now, settings.MissionControlVoice,
+                (int)(area.width * GUI.matrix.m00), (int)(area.height * GUI.matrix.m11), resizing);
+            int signal = kerbal ? reconnect.Signal : 0;
+            int mood = kerbal ? reconnect.Mood : 0;
+            if (kerbal)
+                GUI.DrawTexture(area, reconnect.Texture, ScaleMode.ScaleAndCrop, false);
+            else
+            {
+                GUI.DrawTexture(area, controlRoom.Frame(now), ScaleMode.ScaleAndCrop, false);
+                signal = controlRoom.Signal;
+                mood = signal >= 3 ? 1 : 0;
+            }
+            // Leichtes Flimmern ueber dem Bild, solange kein Signal da ist.
+            if (signal == 0)
+            {
+                Color old = GUI.color;
+                float scan = (now * 60f) % Mathf.Max(1f, area.height);
+                GUI.color = new Color(1, 1, 1, 0.08f);
+                GUI.DrawTexture(new Rect(area.x, area.y + scan, area.width, 3), Texture2D.whiteTexture);
+                GUI.color = old;
+            }
+            // Anzeige als halbdurchsichtige Tafel rechts oben ueber dem Bild.
+            float panelWidth = Mathf.Min(260, area.width * 0.42f);
+            bool tall = area.height >= 170;
+            Rect panel = new Rect(area.xMax - panelWidth - 10, area.y + 10, panelWidth, tall ? 150 : 64);
+            GUI.Box(panel, "", windowTheme.ResultPanel);
+            float x = panel.x + 10, y = panel.y + 8;
+            GUI.Label(new Rect(x, y, panel.width - 20, 18), Loc.Get("#PSR_Reconnect_Title"), windowTheme.Small);
+            Color keep = GUI.color;
+            for (int i = 0; i < 4; i++)
+            {
+                float h = 8 + i * 6;
+                GUI.color = i < signal ? (signal >= 3 ? windowTheme.Accent : new Color(0.95f, 0.78f, 0.3f)) : new Color(0.25f, 0.3f, 0.38f);
+                GUI.DrawTexture(new Rect(x + i * 11, y + 48 - h, 8, h), Texture2D.whiteTexture);
+            }
+            GUI.color = keep;
+            string state = mood == 1 ? Loc.Get("#PSR_Reconnect_Signal") : mood == 2 ? Loc.Get("#PSR_Reconnect_Lost")
+                : Loc.Get("#PSR_Reconnect_NoSignal");
+            bool blink = mood == 0 && (int)(now * 2) % 2 == 0;
+            GUI.Label(new Rect(x + 52, y + 22, panel.width - 70, 26), blink ? "" : state,
+                mood == 1 ? windowTheme.Heading : windowTheme.Warning);
+            if (tall)
+            {
+                string dots = new string('.', 1 + (int)(now * 2) % 3);
+                GUI.Label(new Rect(x, y + 56, panel.width - 20, 44), Loc.Get("#PSR_Reconnect_Status") + dots, windowTheme.Muted);
+                if (TimeWarp.CurrentRate > 1)
+                    GUI.Label(new Rect(x, y + 100, panel.width - 20, 40),
+                        Loc.Get("#PSR_Reconnect_Warp", TimeWarp.CurrentRate.ToString("0")), windowTheme.Small);
+            }
+        }
+
+        // Dauerhaft im Kamerafeld: wie es fuer diesen Booster ausging.
+        private void DrawResult(TrackedBooster b, Rect area)
+        {
+            string title, tag; GUIStyle style; Color stripe;
+            switch (b.Result)
+            {
+                case BoosterResult.Recovered: tag = "#PSR_Result_Recovered"; style = windowTheme.ResultGood; stripe = windowTheme.Good; break;
+                case BoosterResult.Landed: tag = "#PSR_Result_Landed"; style = windowTheme.ResultGood; stripe = windowTheme.Good; break;
+                case BoosterResult.LandedUnconfirmed: tag = "#PSR_Result_Unconfirmed"; style = windowTheme.ResultNeutral; stripe = new Color(0.95f, 0.78f, 0.3f); break;
+                case BoosterResult.Crashed: tag = "#PSR_Result_Crashed"; style = windowTheme.ResultBad; stripe = windowTheme.Alarm; break;
+                case BoosterResult.Destroyed: tag = "#PSR_Result_Destroyed"; style = windowTheme.ResultBad; stripe = windowTheme.Alarm; break;
+                default: tag = "#PSR_Result_Ended"; style = windowTheme.ResultNeutral; stripe = windowTheme.Secondary; break;
+            }
+            title = Loc.Get(tag);
+            string detail = "";
+            if (b.Result != BoosterResult.Ended && RecoveryPolicy.Finite(b.ResultSink) && b.Result != BoosterResult.Destroyed)
+                detail = Loc.Get("#PSR_Result_Detail", Math.Max(0, b.ResultSink).ToString("0.0"),
+                    RecoveryPolicy.Finite(b.ResultLateral) ? b.ResultLateral.ToString("0.0") : "—");
+            if (b.Result == BoosterResult.Recovered && b.ResultFunds > 0)
+                detail += (detail.Length > 0 ? "  ·  " : "") + "+" + b.ResultFunds.ToString("N0", CultureInfo.CurrentCulture) + " Funds";
+            float width = Mathf.Min(area.width - 24, 480), height = detail.Length > 0 ? 64 : 44;
+            Rect box = new Rect(area.x + (area.width - width) / 2, area.yMax - height - 14, width, height);
+            GUI.Box(box, "", windowTheme.ResultPanel);
+            Color keep = GUI.color;
+            GUI.color = stripe;
+            GUI.DrawTexture(new Rect(box.x, box.y + 6, 4, box.height - 12), Texture2D.whiteTexture);
+            GUI.color = keep;
+            GUI.Label(new Rect(box.x + 8, box.y + 6, box.width - 16, 30), title, style);
+            if (detail.Length > 0)
+            {
+                GUIStyle small = new GUIStyle(windowTheme.Small) { alignment = TextAnchor.MiddleCenter };
+                GUI.Label(new Rect(box.x + 8, box.y + 38, box.width - 16, 18), detail, small);
+            }
+        }
+
         private void Metric(Rect rect, string label, string value)
         {
             GUI.Box(rect, "", windowTheme.Panel);
@@ -232,7 +401,7 @@ namespace BoosterWatch
             Rect viewport = new Rect(18, 168, w, window.height - 272);
             float contentWidth = w - 20;
             bool wide = contentWidth >= 760;
-            float contentHeight = wide ? 406 : 620;
+            float contentHeight = wide ? 582 : 810;
             settingsScroll = GUI.BeginScrollView(viewport, settingsScroll, new Rect(0, 0, contentWidth, contentHeight));
             SettingsCard(new Rect(0, 0, contentWidth, 128), Loc.Get("#PSR_Settings_Tracking"), Loc.Get("#PSR_Settings_TrackingHint"));
             rangeInput = SettingField(0, 74, contentWidth, Loc.Get("#PSR_Settings_Range"), rangeInput, "km",
@@ -255,6 +424,22 @@ namespace BoosterWatch
             GUI.enabled = enabled;
             chuteHeightInput = SettingField(x, y + 149, col, Loc.Get("#PSR_Settings_ChuteHeight"), chuteHeightInput, "m",
                 Loc.Get("#PSR_Settings_ChuteHeightHint"), "BWChuteHeight");
+            // Wiedereintritt: drei Grade der Hitze und der optionale Burn dagegen.
+            float heatY = wide ? 392 : 620;
+            SettingsCard(new Rect(0, heatY, contentWidth, 176), Loc.Get("#PSR_Settings_Heat"), Loc.Get("#PSR_Settings_HeatHint"));
+            float choice = (contentWidth - 32 - 16) / 3;
+            HeatMode[] modes = { HeatMode.Easy, HeatMode.Normal, HeatMode.Realistic };
+            for (int i = 0; i < modes.Length; i++)
+                if (GUI.Button(new Rect(16 + i * (choice + 8), heatY + 64, choice, 30), Loc.Get(HeatPolicy.Tag(modes[i])),
+                    heatModeInput == modes[i] ? windowTheme.ActiveButton : windowTheme.Button))
+                    heatModeInput = modes[i];
+            GUI.Label(new Rect(16, heatY + 98, contentWidth - 32, 22), Loc.Get(HeatPolicy.HintTag(heatModeInput)), windowTheme.Small);
+            GUI.enabled = enabled && HeatPolicy.Destructive(heatModeInput);
+            entryBurnInput = Switch(new Rect(16, heatY + 124, Mathf.Min(contentWidth - 32, 340), 30),
+                Loc.Get("#PSR_Settings_EntryBurn"), entryBurnInput);
+            GUI.Label(new Rect(Mathf.Min(contentWidth - 32, 340) + 28, heatY + 124, Mathf.Max(0, contentWidth - 384), 34),
+                Loc.Get("#PSR_Settings_EntryBurnHint"), windowTheme.Small);
+            GUI.enabled = enabled;
             GUI.EndScrollView();
             GUI.Label(new Rect(20, window.height - 96, w - 171, 47), settingsMessage.Length > 0 ? settingsMessage : Loc.Get("#PSR_Settings_Footer"), windowTheme.Muted);
             if (GUI.Button(new Rect(window.width - 181, window.height - 94, 163, 36), Loc.Get("#PSR_Settings_Save"), windowTheme.ActiveButton)) ApplySettings();
@@ -283,18 +468,20 @@ namespace BoosterWatch
                 || !ParseSetting(chuteHeightInput, 100, 20000, out chute))
             { settingsMessage = Loc.Get("#PSR_Settings_RangeError"); return; }
             float oldRange = settings.PhysicsRange;
-            bool oldAuto = settings.AutoStage, oldPowered = settings.PoweredLanding;
+            bool oldAuto = settings.AutoStage, oldPowered = settings.PoweredLanding, oldEntryBurn = settings.EntryBurn;
+            HeatMode oldHeat = settings.HeatMode;
             double oldAltitude = settings.AutoStageHeight, oldSpeed = settings.LandingSpeed, oldChute = settings.ChuteHeight;
             int oldStage = settings.LastAutoStage;
             settings.PhysicsRange = (float)(range * 1000); settings.AutoStage = autoStageInput;
             settings.AutoStageHeight = altitude; settings.LastAutoStage = stage;
             settings.PoweredLanding = poweredInput; settings.LandingSpeed = speed;
             settings.ChuteHeight = chute;
+            settings.HeatMode = heatModeInput; settings.EntryBurn = entryBurnInput;
             if (!settings.Save())
             {
                 settings.PhysicsRange = oldRange; settings.AutoStage = oldAuto; settings.AutoStageHeight = oldAltitude;
                 settings.LastAutoStage = oldStage; settings.PoweredLanding = oldPowered; settings.LandingSpeed = oldSpeed;
-                settings.ChuteHeight = oldChute;
+                settings.ChuteHeight = oldChute; settings.HeatMode = oldHeat; settings.EntryBurn = oldEntryBurn;
                 settingsMessage = Loc.Get("#PSR_Settings_SaveFailed"); return;
             }
             foreach (TrackedBooster b in boosters)

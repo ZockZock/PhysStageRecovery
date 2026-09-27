@@ -1,8 +1,81 @@
-# PhysStageRecovery 0.9.48 — KSP 1.12.5
+# PhysStageRecovery 0.9.57 — KSP 1.12.5
 
 PhysStageRecovery hält abgetrennte, unbemannte Booster in einer einstellbaren Physikreichweite aktiv. Ein frei skalierbares Kamerafenster zeigt ihren Sinkflug. Der eingebaute Landeautomat steuert Schub und Lage, öffnet sichere Stock-Fallschirme und fährt Landebeine aus.
 
 **MechJeb muss weder installiert noch als Bauteil am Booster vorhanden sein.** Von MechJeb übernommen ist nur noch die Lageregelung (`BetterController`); sie ist im eigenen Plugin enthalten. Erforderlich ist weiterhin Harmony 2 unter `GameData/000_Harmony/0Harmony.dll`.
+
+## 0.9.57: Scatterer-Meer auch im Booster-Bild
+
+Mit Scatterer war bei Wasserlandungen im Kamerafenster kein Wasser zu sehen, nur der Meeresgrund.
+Scatterer schaltet den Stock-Ozean ab und zeichnet ein eigenes Meer, blendet es aber nach der Hoehe
+der Hauptkamera aus (`_PlanetOpacity`). Ist die Oberstufe hoch oben, war das Meer damit auch fuer die
+Booster-Kamera aus. Jetzt wird es fuer das Booster-Bild voll eingeblendet und danach zurueckgestellt.
+Scatterer wird dafuer nicht vorausgesetzt. Im Log steht einmal
+"Scatterer-Ozean auf <Planet>: ... fuer die Booster-Kamera voll eingeblendet".
+
+## 0.9.56: Wasser um ferne Booster in voller Aufloesung
+
+Bei Wasserlandungen sah das Meer im Kamerafenster grob und verwaschen aus: Die Detail-Zentren um die
+Booster galten nur fuer die Landoberflaeche, der Ozean eines Himmelskoerpers ist aber eine eigene
+PQS-Kugel (ein Kind der Landkugel) und verfeinerte sich weiter nur um das aktive Schiff. Jetzt bekommen
+auch Kind-Kugeln (Ozean) die Booster als Detail-Zentren. Im Log steht einmal
+"Gelaende-Detail: auch <Name> (Kind von ...)".
+
+## 0.9.55: Missionskontrolle bildfüllend, Fernsehschnee beim Umschalten
+
+* **Bildfüllend:** Die Missionskontrolle füllt jetzt das ganze Kamerafeld, genau wie das Livebild. Die Figur wird in der Größe des Feldes gefilmt, und die Anzeige (Signalbalken, Status) liegt als halbdurchsichtige Tafel oben rechts darüber.
+* **Fernsehschnee:** Beim Wechsel zwischen Livebild und Missionskontrolle und beim Wechsel zwischen Boostern rauscht das alte Bild in ~0,45 s zu, danach rauscht das neue auf.
+
+## 0.9.54: Ergebnis dauerhaft im Kamerafenster
+
+* **Anzeige:** Für jeden Booster steht nach dem Ende unten im Kamerafeld dauerhaft, wie es ausging. Grün: „GELANDET UND GEBORGEN“ oder „GELANDET“. Gelb: „BODENKONTAKT – LANDUNG NICHT BESTÄTIGT“. Rot: „ABGESTÜRZT“ oder „IM FLUG ZERSTÖRT“. Grau: „VERFOLGUNG BEENDET“, wenn du übernommen hast oder nach einer Stufentrennung.
+* **Details:** Darunter stehen Sinken und Seitenfahrt beim Bodenkontakt, bei einer Bergung auch die gutgeschriebenen Funds.
+* **Mehrere Booster:** Mit ‹ › im Fenster wechselst du zwischen den Boostern und siehst jeden Ausgang (`TrackedBooster.Result`).
+
+## 0.9.53: Missionskontrolle statt schwarzem Bild
+
+Solange das Kamerafenster kein Bild hat, weil der Booster im Zeitraffer auf Schienen fliegt oder noch keine Physik hat, zeigt es jetzt die Missionskontrolle (`src/ReconnectScene.cs`).
+
+* **Szene:** Links sitzt Gene Kerman, KSPs eigener Tutorial-Sprecher. Das Prefab `Instructor_Gene` kommt aus deiner Installation und wird mit seiner eigenen Kamera gefilmt, genau wie in den Tutorials. Er schaut sich um, wundert sich, schüttelt den Kopf und seufzt. Dann klettern die Signalbalken, er zeigt Daumen hoch, und das Signal ist wieder weg. Eine Runde dauert 14 s.
+* **Anzeige:** Rechts steht „MISSIONSKONTROLLE“ mit Signalbalken, blinkendem „KEIN SIGNAL“ / „SIGNAL!“ / „… wieder weg“, „Verbindung zum Booster wird wiederhergestellt…“ und im Zeitraffer dessen Stufe.
+* **Echte Zeit:** Die Figur bewegt sich in echter Zeit, auch im Physikwarp. Die Szene wird abgebaut, sobald sie 3 s nicht mehr gebraucht wird, damit keine zweite Kamera mitläuft.
+* **Stimme:** Die Kerbals murmeln bei ihren Gesten. Das ist standardmäßig stumm und lässt sich mit `missionControlVoice = true` in `settings.cfg` einschalten.
+* **Rückfall:** Fehlt das Prefab oder geht beim Laden etwas schief, zeigt das Fenster einen gezeichneten Kontrollraum (`src/ControlRoomAnimation.cs`): ein Ingenieur an der Konsole, Monitore mit Rauschen und Signalbalken. Das Log nennt dann den Grund und einmal alle verfügbaren Sprecher („Missionskontrolle: verfügbare Sprecher: …“).
+
+## 0.9.52: Warnung, wenn die Steuerkraft nicht zum Gleiten reicht
+
+Flüge vom 26.09.2026, 09:16 und 09:23, ohne Steuerflächen. Befohlen waren 35° Anstellwinkel, erreicht wurden 0,2 bis 3°, und der Luftwiderstand blieb der der rückwärts fallenden Stufe. Das Gleiten lief trotzdem bis zur Mindesthöhe von 2 km weiter, weil der Rumpf nicht nach unten drückte. Beide Stufen schlugen mit rund 650 m/s auf, ohne je zu zünden.
+
+* **Erkennung** (`src/DescentGuidance.cs`, `GlideSettings.MinimumReachedDegrees = 5`, `CheckPressure = 2000 Pa`): Sobald die Luft trägt (Staudruck ab 2 kPa), wird der erreichte Anstellwinkel über ~3 s gemittelt. Liegt er nach 10 s darüber unter 5°, reichen die Steuerkräfte nicht. Das Gleiten wird beendet („Steuerkraft reicht nicht …“) und die Zündung normal geplant. In dünner Luft dreht auch eine Stufe mit Steuerflächen erst langsam ein, deshalb wird dort noch nicht geprüft. Mit Flächen wurden 9 bis 13° erreicht.
+* **Große rote Warnung** auf dem Bildschirm (12 s): „STEUERKRAFT REICHT NICHT – der Booster kann den Gleitwinkel nicht halten (2° statt 35°). Steuerflächen anbauen oder Schwerpunkt verlegen.“ Im Fenster steht in Rot „STEUERKRAFT REICHT NICHT ZUM GLEITEN“, der Tooltip nennt den erreichten Winkel.
+* **Nachbau:** Aus 32 km mit 800 m/s Sinken und 900 m/s seitlich erreicht die Stufe ohne Steuerkraft nur 2°. Die Warnung kommt, die Stufe zündet bei 13,6 km und landet mit 5,8 m/s. Mit Steuerflächen (12°) gleitet sie ohne Fehlalarm.
+
+## 0.9.51: Mehr Hitze zulassen, später bremsen
+
+Flug vom 26.09.2026, 08:51, Grad Realistisch: geborgen (2,3 m/s seitlich). Der Eintrittsburn zündete aber bei 53,8 km und kostete 600 m/s (1670 auf 1100 m/s). Danach wurden nur 42 % der Grenze erreicht.
+
+* **Ursache:** Die Vorhersage rechnete mit dem Rückwärts-Widerstand (Cd·A 0,7). Ab 48 km gleitet die Stufe aber mit Cd·A ~6 und bremst in der Luft viel stärker. Das Wärmemodell allein lag entlang der echten Bahn nur mäßig daneben (55 statt 42 %, im Flug davor 53 statt 37 %). Die Bahn machte den Fehler.
+* **Warten auf das Gleiten** (`src/EntryBurn.cs`): Solange die Stufe gleich gleiten wird oder gerade erst ins Gleiten dreht (6 s), entscheidet das Modell nicht. Danach rechnet es ohne Schub mit dem gemessenen Gleitwiderstand und während des Burns mit dem Rückwärts-Widerstand. Die Sicherung aus dem gemessenen Anstieg gilt immer.
+* **So spät wie möglich:** Gezündet wird erst, wenn ein Burn 3 s später nicht mehr reichen würde. Das Modell lernt bis dahin weiter, und seine Vorhersage sank in beiden Flügen mit jeder Sekunde.
+* **Mehr Hitze:** Die Zielspitze liegt bei 95 % statt 90 % der Grenze. Der Burn läuft, bis der Rest ohne Schub unter 90 % bleibt, damit er nicht an der Kante gleich wieder zündet.
+* **Testrahmen:** Ein Eintritt mit 2000 m/s und Gleiten ab 48 km erreicht ohne Burn 117 %, mit Burn 89 % für 343 m/s. Wer so spät zündet, zahlt bei einem genauen Modell etwas mehr als ein Burn gleich am Rand der Atmosphäre (2100 m/s: 459 statt 406 m/s). Dafür verbrennt er nichts, wenn die Vorhersage sich als zu hoch herausstellt. Bekannte Grenze: Bei 2100 m/s und Gleiten reicht der Vorrat ab dem Gleiten nicht mehr. Nur ein Burn gleich am Rand der Atmosphäre hätte gereicht.
+
+## 0.9.50: Eintrittsburn wartet auf Messwerte, Aufrichten im Takt der Drehrate
+
+Flug vom 26.09.2026, 08:33, Grad Realistisch mit Eintrittsburn.
+
+* **Eintrittsburn zu früh und zu lang:** Bei 60,6 km war die Hitze erst von 16 auf 18 % gestiegen. Das Modell sagte daraus 121 % voraus, der Burn nahm 558 m/s weg (1490 auf 980 m/s). Danach wurden nur 37 % erreicht. Aus so wenig Anstieg ist die Abkühlung der Teile nicht zu bestimmen, und ohne sie liegt die Voraussage viel zu hoch. Jetzt entscheidet das Modell erst, wenn die Hitze im Eintritt um 5 Prozentpunkte gestiegen ist (`EntryBurnPolicy.MinimumRise`). Der aufgezeichnete Flug, noch einmal durch die Regel geschickt: Das Modell steht bei 36 km, sagt 49 % voraus, kein Burn. Die Sicherung aus dem gemessenen Anstieg gilt weiter.
+* **Wackelige Landung, 6,7 m/s seitlich:** Bis 63 m lag die Stufe 25° schräg gegen 10 m/s Seitenfahrt. Bei 43 m war die Seitenfahrt fast weg, die Stufe hing aber noch 28° schief und brauchte 1,5 s zum Aufrichten. Dabei schob sie sich mit bis zu 12 m/s in die Gegenrichtung. Jetzt ist die Schräglage nie größer, als sich bis zum Ende der Seitenfahrt wieder aufrichten lässt: θ = √(2·ω·v/a) mit der angenommenen Drehrate ω = 10°/s (`ControlSettings.TurnRateDegrees`, `src/CaptureBraking.cs`). Die Stufe richtet sich so schon auf, während die letzte Seitenfahrt herausgeht. Im Nachbau (377 m, 88 m/s, 83 m/s seitlich, Zielhöhe 10 m) vorher 5,3 m/s (17°/s) bzw. 15 m/s (10°/s) seitlich beim Aufsetzen, jetzt 1,1 bzw. 0,8 m/s.
+* Hinweis zur Hitzespitze im Log: Sie zählt ab der Trennung. In diesem Flug lagen die 83 % (Fernsteuerungseinheit) noch im Aufstieg bei 46 km, im Abstieg waren es höchstens 37 %.
+
+## 0.9.49: Drei Grade für die Hitze, Eintrittsburn
+
+* **Wiedereintritt: Leicht, Normal, Realistisch** (Einstellungen, neue Karte „Wiedereintritt“; `src/HeatPolicy.cs`, `src/HeatGuard.cs`): Leicht ist der bisherige Hitzeschutz, verfolgte Booster können nicht verglühen (Standard). Normal rechnet echte Hitze, die Teile halten aber 20 % mehr aus als ihre eigene Grenze. Realistisch lässt die Grenzen der Teile unverändert: Ein zu steiler oder zu schneller Eintritt zerstört den Booster. Die Rakete, die du fliegst, wird nie verändert. Aus `heatImmune = true/false` wird beim ersten Start `heatMode = easy/realistic` (`configVersion = 9`).
+* **Hitze in der Anzeige und im Log:** Ab 30 % zeigt die Zustandszeile die Hitze des heißesten Teils als Anteil an der Grenze, die ihn zerstört (im Grad Leicht: an der Grenze, die ohne Schutz gälte). `Landing check` schreibt `hitze=`, die Flug-CSV hat die Spalten `hitze`, `hitzeVoraus` und `eintrittBurn`. Beim Loslassen eines Boosters steht eine Zeile „Hitze …: Spitze … % der Grenze“ mit Höhe, Fahrt und Bauteil im Log.
+* **Eintrittsburn** (Schalter in derselben Karte, nur Normal/Realistisch, nur mit Landeautomat; `src/EntryBurnPolicy.cs`, `src/EntryBurn.cs`): Er zündet nur, wenn die Hitze sonst die Grenze erreichen würde, und nur so lange, bis der Rest des Eintritts ohne Schub unter 90 % bleibt. Dafür lernt der Mod im Flug, wie das heißeste Teil auf die Anströmung reagiert. Die Form rechnet er genau wie KSP (Wärmeübergang und Stoßtemperatur aus `PhysicsGlobals`), die Konstanten des Bauteils lernt er aus der gemessenen Temperatur. Damit rechnet er den Rest des Eintritts voraus und wählt den kürzesten Burn, der reicht. Er zündet, sobald Warten nicht mehr billiger ist. Steigt die Hitze schneller als vorausgesagt, bremst er trotzdem. Während des Burns zeigt die Stufe gegen die Bahn statt zu gleiten, danach gleitet sie weiter.
+* **Landevorhalt bleibt:** Der Burn gibt nie mehr aus als über dem 1,25-fachen vorausgesagten Landebedarf liegt, und mindestens 40 % des Delta-v beim Eintritt bleiben immer.
+* **Nachbau im Testrahmen** (`tests/EntryBurnTests.cs`, Wärmemodell in KSPs Form mit Abstrahlung und Leitung ins Innere): Ein steiler Eintritt mit 2300 m/s erreicht ohne Burn 148 % der Grenze. Mit Burn bleibt er unter der Grenze (Werte seit 0.9.50: 2100 m/s bei 30° ohne Burn 128 %, mit Burn 89 % für 424 m/s, ein idealer Burn am Rand der Atmosphäre bräuchte 404 m/s; 2300 m/s bei 35°: 91 % für 862 m/s). Weicht das Wärmemodell in der Form ab, bleibt es unter der Grenze, bremst aber deutlich zu viel. Ein flacher Eintritt kostet nichts.
+* Log: „Eintrittsburn … an/aus“ mit Grund, Höhe, Fahrt, Hitze und verbrauchtem Delta-v; alle 5 s „Hitze …“ mit dem gelernten Modell.
 
 ## 0.9.48: Zeitraffer bis 30 s vor dem Eintritt
 
@@ -990,7 +1063,7 @@ Das Fenster startet geschlossen und öffnet sich automatisch nur beim Erfassen e
 
 **Mod** und **Auto-Bergung** werden unmittelbar gespeichert. Im Einstellungsreiter Änderungen mit **Speichern** übernehmen. Fenstergröße/-position, Kameradistanz und Kamerawinkel werden automatisch gespeichert. Drehen mit rechter Maustaste und Zoomen mit dem Mausrad funktionieren direkt über dem Kamerabild; über den Einstellungen scrollt das Mausrad nur die Einstellungen.
 
-Fortgeschrittene Optionen stehen ausschließlich in `GameData/PhysStageRecovery/PluginData/settings.cfg`: `maxSinkSpeed` und die übrigen Sicherheitsgrenzen, `heatImmune`, `cameraEnabled`, `cameraFps`, `cameraDistance`, `cameraHeading`, `cameraPitch`, `autoArm`, `maxBoosters`, `autoOpenWindow` und `showDiagnostics`. `showDiagnostics = true` blendet die ausführlichen Anzeigen und den Diagnoseknopf wieder ein. Dateiänderungen bei geschlossenem Spiel vornehmen.
+Fortgeschrittene Optionen stehen ausschließlich in `GameData/PhysStageRecovery/PluginData/settings.cfg`: `maxSinkSpeed` und die übrigen Sicherheitsgrenzen, `cameraEnabled`, `cameraFps`, `cameraDistance`, `cameraHeading`, `cameraPitch`, `autoArm`, `maxBoosters`, `autoOpenWindow` und `showDiagnostics`. `showDiagnostics = true` blendet die ausführlichen Anzeigen und den Diagnoseknopf wieder ein. Dateiänderungen bei geschlossenem Spiel vornehmen.
 
 **Die Bergung oberhalb des Bodens wurde entfernt.** Die früheren Schlüssel `recoveryHeight`, `requireTouchdown` und `touchdownSeconds` werden beim Laden bereinigt. Deine in 0.7.9 verwendete sofortige Bergung bei unbeschädigtem Bodenkontakt einschließlich der bestehenden Gelände-Erkennung bleibt Grundlage der Bergung. Andere bestehende Werte werden übernommen.
 
@@ -1016,7 +1089,7 @@ Ist die Auto-Bergung ausgeschaltet, bleibt der Booster nach dem Aufsetzen stehen
 
 Ein Booster, der den Wiedereintritt sauber rückwärts ausgerichtet durchfliegt, zeigt dem Luftstrom seine kleinste Querschnittsfläche. Er bremst dadurch langsamer als ein taumelnder Booster und heizt sich stärker auf. KSP zerlegt ein Bauteil in `Part._CheckPartTemp`, sobald seine Temperatur oder seine Hauttemperatur `maxTemp` beziehungsweise `skinMaxTemp` überschreitet; ein eigenes Wiedereintritts-Schadensmodul gibt es in 1.12 nicht mehr.
 
-Die Einstellung `heatImmune` in der Einstellungsdatei hebt genau diese beiden Grenzen für die Bauteile verfolgter Booster an und stellt die Originalwerte wieder her, sobald der Booster losgelassen oder geborgen wird. Andere Fahrzeuge, insbesondere die aktive Rakete, werden nie verändert: es ist bewusst nicht KSPs globaler Schalter `CheatOptions.IgnoreMaxTemperature`. Die Option ist standardmäßig an. Wird sie während eines Wiedereintritts abgeschaltet, zerbrechen bereits zu heiße Bauteile sofort wieder. Jede `Landing check`-Zeile nennt die Anzahl geschützter Bauteile als `heat=`.
+Der Grad der Wiedereintrittshitze (Einstellungen, Karte „Wiedereintritt“; in der Datei `heatMode = easy | normal | realistic`) setzt genau diese beiden Grenzen für die Bauteile verfolgter Booster: Leicht hebt sie praktisch auf (Standard), Normal setzt sie 20 % über die Originalwerte, Realistisch lässt sie unverändert. Die Originalwerte kommen zurück, sobald der Booster losgelassen oder geborgen wird oder du ihn selbst fliegst. Andere Fahrzeuge, insbesondere die aktive Rakete, werden nie verändert: es ist bewusst nicht KSPs globaler Schalter `CheatOptions.IgnoreMaxTemperature`. Wird der Grad während eines Wiedereintritts strenger gestellt, zerbrechen bereits zu heiße Bauteile sofort. Jede `Landing check`-Zeile nennt die Anzahl angehobener Bauteile als `heat=` und die Hitze des heißesten Teils als `hitze=`. Mit `entryBurn = true` (Schalter „Eintrittsburn“) bremst der Landeautomat in den Graden Normal und Realistisch gerade so viel, dass die Grenze hält (siehe 0.9.49).
 
 ## Weitere Funktionen
 

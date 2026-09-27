@@ -119,9 +119,9 @@ namespace BoosterWatch
             + "zielSink,aFrei,reqDv,predTd,reserve,predUnst,predIgn,predBurn,"
             + "aUpCmd,aOstCmd,aNordCmd,drossel,gateCut,"
             + "aimUp,aimOst,aimNord,lage,err,istAcc,"
-            + "engines,engOn,flameout,engThr,engFlame,landed,zuendgrund,notes";
+            + "engines,engOn,flameout,engThr,engFlame,landed,zuendgrund,notes,hitze,hitzeVoraus,eintrittBurn";
 
-        // 58 values. Text is quoted (RFC 4180): the status column contains commas. Numbers are written with a fixed culture so a German Windows does not turn the
+        // 61 values. Text is quoted (RFC 4180): the status column contains commas. Numbers are written with a fixed culture so a German Windows does not turn the
         // decimal point into a comma and break every parser, including mine.
         public static string Row(params object[] values)
         {

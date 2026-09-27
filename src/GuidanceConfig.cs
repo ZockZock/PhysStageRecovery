@@ -120,6 +120,10 @@ namespace BoosterWatch.Guidance
         {
             internal ControlSettings Copy() { return (ControlSettings)MemberwiseClone(); }
             public double LateralTimeConstant = 1.2;
+            // So schnell dreht sich eine Stufe im Endanflug sicher [Grad/s] (Flug vom 26.09.2026: ~17 bei
+            // 20 % Schub). CaptureBraking haelt die Schraeglage nie groesser, als sich bis zum Ende der
+            // Seitenfahrt wieder aufrichten laesst.
+            public double TurnRateDegrees = 10;
             // How hard the terminal phase pulls the sink rate back onto the profile below the capture
             // altitude, in seconds: the commanded deceleration is the error over this number. A short
             // value tracks the taper from the capture speed to the touchdown speed closely and asks
@@ -191,6 +195,14 @@ namespace BoosterWatch.Guidance
             // auf der falschen Seite im Luftstrom: dann schadet das Gleiten. Ohne Auftrieb bremst es
             // immer noch mit dem viel groesseren Widerstand und bleibt deshalb erlaubt.
             public double MinimumLiftRatio = -0.05;
+            // Erreicht die Stufe nach LiftCheckSeconds im Mittel weniger Anstellwinkel als das, reichen
+            // die Steuerkraefte nicht fuer das Gleiten [Grad]. Fluege vom 26.09.2026, 09:16 und 09:23
+            // (ohne Steuerflaechen): 0,2-3 Grad statt 35, Cd*A wie rueckwaerts, bis 2 km "gegleitet"
+            // und mit 650 m/s aufgeschlagen. Mit Steuerflaechen wurden 9-12 Grad erreicht und das
+            // Gleiten bremste mit dem Achtfachen.
+            public double MinimumReachedDegrees = 5;
+            // Geprueft wird erst ab diesem Staudruck [Pa]; gezaehlt werden LiftCheckSeconds darueber.
+            public double CheckPressure = 2000;
         }
 
         public readonly TerminalSettings Terminal = new TerminalSettings();

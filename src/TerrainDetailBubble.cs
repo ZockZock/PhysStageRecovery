@@ -54,6 +54,7 @@ namespace BoosterWatch
         private static readonly Dictionary<PQS, Anchor[]> anchors = new Dictionary<PQS, Anchor[]>();
         private static readonly Anchor[] none = new Anchor[0];
         private static bool reported;
+        private static readonly HashSet<string> reportedOcean = new HashSet<string>();
         // Kugeln, bei denen WIR forceActivate gesetzt haben - nur die werden wieder freigegeben.
         private static readonly HashSet<PQSMod_CelestialBodyTransform> forced = new HashSet<PQSMod_CelestialBodyTransform>();
         private static readonly Dictionary<PQS, PQSMod_CelestialBodyTransform> bodyTransforms
@@ -86,6 +87,7 @@ namespace BoosterWatch
             textureAnchors.Clear();
             fadedFor = null;
             source = null;
+            scattererOceans.Clear();
             anchors.Clear();
             Active = false;
             if (harmony != null) harmony.UnpatchAll(Id);
@@ -122,7 +124,7 @@ namespace BoosterWatch
                 List<Vessel> vessels = source == null ? null : source();
                 if (vessels != null)
                     foreach (Vessel v in vessels)
-                        if (v != null && v.mainBody != null && v.mainBody.pqsController == __instance && scratch.Count < MaxAnchors)
+                        if (v != null && v.mainBody != null && scratch.Count < MaxAnchors && Belongs(__instance, v.mainBody))
                             scratch.Add(v);
                 if (scratch.Count > 0)
                 {
@@ -137,7 +139,10 @@ namespace BoosterWatch
                     }
                     // Die Bremsen des aktiven Schiffs gelten nicht fuer die Booster.
                     __instance.maxLevelAtCurrentTgtSpeed = __instance.maxLevel;
-                    if (!reported)
+                    if (__instance.parentSphere != null && reportedOcean.Add(__instance.name))
+                        Debug.Log("[PhysStageRecovery] Gelaende-Detail: auch " + __instance.name + " (Kind von "
+                            + __instance.parentSphere.name + "), Stufen " + __instance.minLevel + "-" + __instance.maxLevel + ".");
+                    if (!reported && __instance.parentSphere == null)
                     {
                         reported = true;
                         Debug.Log("[PhysStageRecovery] Gelaende-Detail: " + list.Length + " Zentrum/Zentren auf "
@@ -176,6 +181,18 @@ namespace BoosterWatch
                 anchors.Clear();
                 Active = false;
             }
+        }
+
+        // Das Gelaende des Planeten - und seine Kind-Kugeln, allen voran der Ozean. Der ist ein eigener
+        // PQS mit eigenem Quadbaum; ohne eigene Zentren blieb er um den Booster so grob wie weit weg vom
+        // aktiven Schiff (Wasserlandung vom 26.09.2026: ein paar grosse, flache Kacheln).
+        private static bool Belongs(PQS pqs, CelestialBody body)
+        {
+            PQS root = body.pqsController;
+            if (root == null) return false;
+            for (PQS p = pqs; p != null; p = p.parentSphere)
+                if (p == root) return true;
+            return false;
         }
 
         private static PQSMod_CelestialBodyTransform BodyTransform(PQS pqs)
@@ -248,6 +265,7 @@ namespace BoosterWatch
                 // Parallax liest die Deckkraft als globalen Wert aus dem Material der Hauptkamera.
                 if (pqs.surfaceMaterial != null && pqs.surfaceMaterial.HasProperty(opacityId))
                     Shader.SetGlobalFloat(opacityId, pqs.surfaceMaterial.GetFloat(opacityId));
+                ShowScattererOcean(target.mainBody);
             }
             catch (Exception e) { Debug.LogError("[PhysStageRecovery] Gelaende-Blende: " + e); }
         }
@@ -270,6 +288,65 @@ namespace BoosterWatch
                 Shader.SetGlobalVector(terrainOffsetId, savedTerrainOffset);
                 Shader.SetGlobalFloat(opacityId, savedOpacity);
             }
+            RestoreScattererOcean();
+        }
+
+        // Scatterer ersetzt den Stock-Ozean (FakeOceanPQS schaltet ihn ab) durch ein eigenes Meer.
+        // Dessen Shader verwirft sich selbst, wenn _PlanetOpacity 0 ist - und diesen Wert setzt
+        // Scatterer einmal pro Bild aus der Hoehe der HAUPTkamera. Ist die Oberstufe hoch oben, ist das
+        // Meer damit auch fuer unsere Kamera aus, und man sieht den Meeresgrund (Wasserlandung vom
+        // 26.09.2026, 19:00). Fuer unser Bild wird das Meer deshalb voll eingeblendet, danach zurueck.
+        // Kein Verweis auf Scatterer: das Material steht im oeffentlichen Feld targetMaterial seines
+        // OceanRenderingHook, der an den Wasserobjekten direkt unter dem Himmelskoerper haengt.
+        private struct OceanLookup { public Material[] Materials; public float Time; }
+        private static readonly Dictionary<CelestialBody, OceanLookup> scattererOceans = new Dictionary<CelestialBody, OceanLookup>();
+        private static readonly List<KeyValuePair<Material, float>> savedOcean = new List<KeyValuePair<Material, float>>();
+        private static readonly HashSet<string> reportedScatterer = new HashSet<string>();
+
+        private static void ShowScattererOcean(CelestialBody body)
+        {
+            savedOcean.Clear();
+            try
+            {
+                foreach (Material m in ScattererOcean(body))
+                {
+                    if (m == null || !m.HasProperty(opacityId)) continue;
+                    savedOcean.Add(new KeyValuePair<Material, float>(m, m.GetFloat(opacityId)));
+                    m.SetFloat(opacityId, 1f);
+                }
+            }
+            catch (Exception e) { Debug.LogError("[PhysStageRecovery] Scatterer-Ozean: " + e); scattererOceans[body] = new OceanLookup { Materials = new Material[0], Time = float.MaxValue }; }
+        }
+
+        private static void RestoreScattererOcean()
+        {
+            foreach (KeyValuePair<Material, float> saved in savedOcean)
+                if (saved.Key != null) saved.Key.SetFloat(opacityId, saved.Value);
+            savedOcean.Clear();
+        }
+
+        private static Material[] ScattererOcean(CelestialBody body)
+        {
+            OceanLookup found;
+            bool known = scattererOceans.TryGetValue(body, out found);
+            bool stale = known && found.Materials.Length > 0 && Array.Exists(found.Materials, m => m == null);
+            // Ohne Fund alle 10 s neu suchen: Scatterer baut sein Meer erst nach dem Szenenstart.
+            if (known && !stale && (found.Materials.Length > 0 || UnityEngine.Time.unscaledTime - found.Time < 10)) return found.Materials;
+            var list = new List<Material>();
+            foreach (Transform child in body.transform)
+                foreach (MonoBehaviour behaviour in child.GetComponents<MonoBehaviour>())
+                {
+                    if (behaviour == null || behaviour.GetType().Name != "OceanRenderingHook") continue;
+                    FieldInfo field = behaviour.GetType().GetField("targetMaterial", BindingFlags.Public | BindingFlags.Instance);
+                    Material m = field == null ? null : field.GetValue(behaviour) as Material;
+                    if (m != null && !list.Contains(m)) list.Add(m);
+                }
+            found = new OceanLookup { Materials = list.ToArray(), Time = UnityEngine.Time.unscaledTime };
+            scattererOceans[body] = found;
+            if (list.Count > 0 && reportedScatterer.Add(body.bodyName))
+                Debug.Log("[PhysStageRecovery] Scatterer-Ozean auf " + body.bodyName + ": " + list.Count
+                    + " Material(ien) - fuer die Booster-Kamera voll eingeblendet.");
+            return found.Materials;
         }
 
         private static void Fade(PQSMod_CelestialBodyTransform t, double altitude)

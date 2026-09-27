@@ -456,6 +456,7 @@ namespace BoosterWatch
                 DragAcceleration = DragAcceleration,
                 LiftRatio = LiftRatio,
                 LiftKnown = LiftKnown,
+                AngleOfAttack = AngleOfAttack,
                 AvailableDeltaV = AvailableDeltaV,
                 AvailableBurnTime = AvailableBurnTime,
                 SlopeDegrees = SlopeDegrees,

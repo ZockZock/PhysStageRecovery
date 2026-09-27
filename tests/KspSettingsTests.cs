@@ -75,6 +75,23 @@ class KspSettingsTests
         withoutHeat.HeatImmune = true;
         Check(withoutHeat.Save(), "Heat protection can be switched back on");
         Check(Settings.Load(defaults).HeatImmune, "Re-enabled heat protection survives reload");
+        // 0.9.49: drei Grade statt eines Schalters, dazu der Wiedereintrittsburn.
+        Settings graded = Settings.Load(defaults);
+        Check(graded.HeatMode == HeatMode.Easy && !graded.EntryBurn, "Default heat is Easy, entry burn off");
+        graded.HeatMode = HeatMode.Normal; graded.EntryBurn = true;
+        Check(graded.Save(), "Heat grade and entry burn save");
+        Settings gradedBack = Settings.Load(defaults);
+        Check(gradedBack.HeatMode == HeatMode.Normal && gradedBack.EntryBurn, "Heat grade Normal and entry burn survive reload");
+        Check(!File.ReadAllText(defaults).Contains("heatImmune") && File.ReadAllText(defaults).Contains("heatMode = normal"),
+            "The old heatImmune key is replaced by heatMode");
+        gradedBack.HeatMode = HeatMode.Realistic; gradedBack.Save();
+        Check(Settings.Load(defaults).HeatMode == HeatMode.Realistic, "Heat grade Realistic survives reload");
+        gradedBack.HeatMode = HeatMode.Easy; gradedBack.EntryBurn = false; gradedBack.Save();
+        string oldHeat = System.IO.Path.Combine(dir, "oldheat.cfg");
+        File.WriteAllText(oldHeat, "PhysStageRecovery\n{\n configVersion = 8\n heatImmune = False\n}\n");
+        Check(Settings.Load(oldHeat).HeatMode == HeatMode.Realistic, "heatImmune = False from 0.9.48 becomes Realistic");
+        Check(File.ReadAllText(oldHeat).Contains("heatMode = realistic") && !File.ReadAllText(oldHeat).Contains("heatImmune"),
+            "The old file is rewritten once with the grade");
         string standalone = System.IO.Path.Combine(dir, "standalone.cfg");
         File.WriteAllText(standalone, "PhysStageRecovery\n{\n configVersion = 2\n useMechJeb = True\n touchdownSeconds = 10\n requireTouchdown = False\n cameraFps = 20\n}\n");
         Settings independent = Settings.Load(standalone);

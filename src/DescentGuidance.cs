@@ -48,6 +48,15 @@ namespace BoosterWatch.Guidance
         public bool Steerable { get { return !double.IsNaN(glideStart) && !glideFailed; } }
         // Warum das Gleiten beendet wurde, fuer das Log (leer = laeuft oder nie begonnen).
         public string GlideEndReason { get; private set; } = "";
+        // Waehrend eines Wiedereintrittsburns (EntryBurn) haelt die Stufe gegen die Bahn statt zu
+        // gleiten. Das Gleiten endet dadurch nicht; seine Pruefzeit auf Auftrieb beginnt danach neu.
+        public bool HoldGlide { get; set; }
+        // Die Stufe erreicht den Gleitwinkel nicht: die Steuerkraefte reichen nicht (Anzeige im Fenster
+        // und als Bildschirmmeldung). Einmal gesetzt, bleibt es fuer diesen Abstieg.
+        public bool GlideAuthorityLacking { get; private set; }
+        // Gemittelter erreichter Anstellwinkel waehrend des Gleitens [Grad].
+        public double ReachedGlideDegrees { get; private set; } = double.NaN;
+        private double reachedTime = double.NaN, reachedSeconds;
         internal double BurnAge(double now) { return double.IsNaN(firstBurnCommandTime) ? 0 : Math.Max(0, now - firstBurnCommandTime); }
 
         public DescentGuidance(DescentConfig config, DescentPredictor predictor)
@@ -107,6 +116,10 @@ namespace BoosterWatch.Guidance
             glideEnded = false;
             glideStart = double.NaN;
             glideFailed = false;
+            GlideAuthorityLacking = false;
+            ReachedGlideDegrees = double.NaN;
+            reachedTime = double.NaN;
+            reachedSeconds = 0;
             GlideEndReason = "";
             LastStep = null;
             ignitionReason = "";
@@ -618,6 +631,11 @@ namespace BoosterWatch.Guidance
             DescentConfig.GlideSettings g = config.Glide;
             if (g.AngleDegrees <= 0 || predictor == null || glideEnded) return false;
             if (phase != DescentPhase.Entry || ordered || hasBurnCommand || aborted) return false;
+            if (HoldGlide)
+            {
+                if (!double.IsNaN(glideStart)) { glideStart = state.Time; reachedSeconds = 0; reachedTime = double.NaN; ReachedGlideDegrees = double.NaN; }
+                return false;
+            }
             if (!(state.AirDensity >= g.MinimumDensity) || speed < g.MinimumSpeed) return false;
             // Only on a valid plan: an invalid or missing one is exactly when the fallback ignition
             // can fire, and it must not find the booster 35 degrees off its engine axis.
@@ -648,7 +666,30 @@ namespace BoosterWatch.Guidance
             // die Stufe kommt ohne Steuerflaechen nicht in den Winkel und haengt irgendwo im Luftstrom -
             // bringt das Gleiten nichts als Unsicherheit (Flug vom 25.09.2026: 45 Grad Lagefehler,
             // Rumpf drueckte nach unten). Dann zurueck auf rueckwaerts.
-            if (double.IsNaN(glideStart)) glideStart = state.Time;
+            if (double.IsNaN(glideStart)) { glideStart = state.Time; ReachedGlideDegrees = double.NaN; reachedTime = double.NaN; reachedSeconds = 0; }
+            // Erreicht die Stufe den Winkel ueberhaupt? Gemittelt ueber ~3 s, und nur, solange die Luft
+            // schon traegt: in duenner Luft dreht auch eine Stufe mit Steuerflaechen erst langsam ein (Flug
+            // vom 25.09.2026: 2-4 Grad in den ersten 10 s bei 48 km, 12-13 Grad ab ~1 kPa). Ohne genug
+            // Steuerkraft bleibt sie rueckwaerts im Luftstrom haengen - dann bremst das Gleiten nicht, und
+            // die Planung mit dem Gleiten haelt die Zuendung bis zur Mindesthoehe zurueck.
+            double dynamic = 0.5 * Math.Max(0, state.AirDensity) * speed * speed;
+            if (RecoveryFinite(state.AngleOfAttack) && dynamic >= g.CheckPressure)
+            {
+                double dt = RecoveryFinite(reachedTime) ? Math.Min(0.5, Math.Max(0, state.Time - reachedTime)) : 0;
+                ReachedGlideDegrees = !RecoveryFinite(ReachedGlideDegrees) ? state.AngleOfAttack
+                    : ReachedGlideDegrees + (state.AngleOfAttack - ReachedGlideDegrees) * (dt / (3 + dt));
+                reachedSeconds += dt;
+                reachedTime = state.Time;
+            }
+            else reachedTime = double.NaN;
+            if (reachedSeconds >= g.LiftCheckSeconds && RecoveryFinite(ReachedGlideDegrees)
+                && ReachedGlideDegrees < Math.Min(g.MinimumReachedDegrees, g.AngleDegrees))
+            {
+                glideFailed = true; GlideAuthorityLacking = true;
+                EndGlide("Steuerkraft reicht nicht (Anstellwinkel " + ReachedGlideDegrees.ToString("0.0") + " statt "
+                    + g.AngleDegrees.ToString("0") + " Grad)");
+                return false;
+            }
             if (state.Time - glideStart >= g.LiftCheckSeconds && state.LiftKnown
                 && RecoveryFinite(state.LiftRatio) && state.LiftRatio < g.MinimumLiftRatio)
             { glideFailed = true; EndGlide("kein Auftrieb (" + state.LiftRatio.ToString("0.00") + " x Widerstand)"); return false; }

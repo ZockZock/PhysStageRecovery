@@ -6,6 +6,9 @@ using UnityEngine;
 
 namespace BoosterWatch
 {
+    // Ausgang eines verfolgten Boosters. None = noch unterwegs.
+    public enum BoosterResult { None, Recovered, Landed, LandedUnconfirmed, Crashed, Destroyed, Ended }
+
     public sealed class TrackedBooster
     {
         public Vessel Vessel;
@@ -20,6 +23,15 @@ namespace BoosterWatch
         public VesselRanges OriginalRanges, ExtendedRanges;
         public bool Finished;
         public bool ImpactFailed;
+        // Wie es fuer diesen Booster ausging, fuer die dauerhafte Anzeige im Kamerafenster.
+        public BoosterResult Result;
+        // Sinken und Seitenfahrt beim Bodenkontakt / bei der Bergung [m/s].
+        public double ResultSink = double.NaN, ResultLateral = double.NaN, ResultFunds;
+        public void SetResult(BoosterResult result)
+        {
+            Result = result;
+            ResultSink = Sample.Sink; ResultLateral = Sample.Horizontal;
+        }
         // True while the vessel cannot be controlled by KSP at all - no control module, or a probe
         // without a connection. The engines would ignore every throttle command.
         public bool ControlMissing;
@@ -35,6 +47,8 @@ namespace BoosterWatch
         public double GroundDepth = double.NaN;
         public string RejectedCollider = "";
         private readonly HeatGuard heat = new HeatGuard();
+        private bool heatReported;
+        public HeatGuard Heat { get { return heat; } }
         private readonly ControlSurfaceFlow surfaces = new ControlSurfaceFlow();
         // Hoehe ueber Grund, ab der die Schirme scharf werden, und ob sie es schon duerfen.
         public double ChuteArmHeight = double.NaN;
@@ -68,6 +82,7 @@ namespace BoosterWatch
         {
             Vessel = vessel; Id = vessel.id; Name = vessel.vesselName;
             Landing = new PoweredLanding(vessel);
+            Landing.Heat = heat;
             foreach (Part part in vessel.parts) KnownParts.Add(part.flightID);
             Anchor = vessel.parts.FirstOrDefault(p => p.FindModuleImplementing<ModuleCommand>() != null)
                 ?? vessel.parts.FirstOrDefault(p => p.FindModulesImplementing<ModuleEngines>().Any(PoweredLanding.Suitable))
@@ -95,6 +110,16 @@ namespace BoosterWatch
             groundPatch.Dispose();
             // Put the stock temperature limits back before the booster leaves the tracked set.
             heat.Restore(Vessel);
+            if (heat.PeakRatio > 0 && !heatReported)
+            {
+                heatReported = true;
+                EntryBurnPolicy burn = Landing.EntryBurn.Policy;
+                Debug.Log("[PhysStageRecovery] Hitze " + Id + ": Spitze " + (100 * heat.PeakRatio).ToString("0")
+                    + " % der Grenze (" + HeatPolicy.Key(heat.Mode) + ", " + heat.PeakPart + ") bei "
+                    + (heat.PeakAltitude / 1000).ToString("0.0") + " km, " + heat.PeakSpeed.ToString("0") + " m/s"
+                    + (burn != null && burn.Burns > 0 ? "; Eintrittsburn " + burn.Burns + "x, " + burn.Spent.ToString("0") + " m/s" : "")
+                    + ".");
+            }
             surfaces.Restore();
             if (Vessel != null && ReferenceEquals(Vessel.vesselRanges, ExtendedRanges))
                 Vessel.vesselRanges = OriginalRanges;
@@ -106,7 +131,7 @@ namespace BoosterWatch
             // Runs for packed vessels too, so a booster that reenters while it is not the physics
             // focus still has its protection in place before KSP checks it.
             // Never on the vessel the player flies (a tracked booster can be switched to).
-            heat.Update(v, settings.HeatImmune && v != FlightGlobals.ActiveVessel);
+            heat.Update(v, settings.HeatMode, v != FlightGlobals.ActiveVessel);
             // Steuerflaechen im Rueckwaertsflug umkehren (ControlSurfaceFlow). Nur mit Physik: ein
             // gepackter Booster hat keine Luft, und dort bleibt der letzte Stand.
             if (v == FlightGlobals.ActiveVessel) surfaces.Restore();
@@ -303,7 +328,7 @@ namespace BoosterWatch
                     // err and cmd separate the two ways a commanded burn becomes 0 %: the guidance
                     // never asked for thrust, or the safety gate in PoweredLanding removed it.
                     + " err=" + Number(Landing.AttitudeError, "deg") + " cmd=" + Number(100 * Landing.CommandedThrottle, "%")
-                    + " heat=" + heat.Protected + " tiefe=" + Number(GroundDepth, "m")
+                    + " heat=" + heat.Protected + " hitze=" + Number(100 * heat.Ratio, "%") + " tiefe=" + Number(GroundDepth, "m")
                     // The speed the braking works against is the whole surface velocity, not just the
                     // sink rate; gesamt makes that visible next to sink and horizontal.
                     + " gesamt=" + Number(Math.Sqrt(Sample.Sink * Sample.Sink + Sample.Horizontal * Sample.Horizontal), "m/s")

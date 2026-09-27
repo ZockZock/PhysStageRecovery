@@ -16,3 +16,9 @@ SHA256SUMS.txt
 .vs/
 .idea/
 *.suo
+
+# Lokale Helfer und Arbeitsordner (gewollt nicht in der Versionierung)
+fresh_test.ps1
+Claude outputs/
+# Test-Binaries, die je im Wurzelordner gelandet sind
+/*.exe

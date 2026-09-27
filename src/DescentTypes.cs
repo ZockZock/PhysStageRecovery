@@ -51,6 +51,9 @@ namespace BoosterWatch.Guidance
         // zurueckdreht (DescentGuidance setzt sie waehrend des Gleitens). 0 = sofort zuendbereit.
         public double PreBurnSeconds;
         public bool LiftKnown;
+        // Winkel zwischen Stufenachse und Rueckwaerts-Richtung [Grad], NaN = unbekannt. Zeigt, ob die
+        // Stufe den befohlenen Gleitwinkel ueberhaupt erreicht.
+        public double AngleOfAttack;
         // Slope under the projected touchdown point [deg]. On a slope the booster lands on one edge
         // of its base before its centre reaches the ground, so the engines have to be cut higher.
         public double SlopeDegrees;

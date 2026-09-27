@@ -16,6 +16,9 @@ namespace BoosterWatch
         private readonly HashSet<uint> failedParts = new HashSet<uint>();
         private readonly HashSet<uint> attachedBoosterChutes = new HashSet<uint>();
         private readonly BoosterCamera cameraFeed = new BoosterCamera();
+        // Ohne Bild: die Missionskontrolle (Kerbal aus dem Spiel), sonst der gezeichnete Kontrollraum.
+        private readonly ReconnectScene reconnect = new ReconnectScene();
+        private readonly ControlRoomView controlRoom = new ControlRoomView();
         private Settings settings;
         private Guid originId;
         private uint originRoot;
@@ -31,7 +34,8 @@ namespace BoosterWatch
         private bool settingsOpen;
         private string rangeInput, settingsMessage = "";
         private string stageHeightInput, lastStageInput, landingSpeedInput, chuteHeightInput;
-        private bool autoStageInput, poweredInput;
+        private bool autoStageInput, poweredInput, entryBurnInput;
+        private HeatMode heatModeInput;
         private Vector2 settingsScroll;
         private float nextScan;
         private double nextMeasure;
@@ -46,7 +50,7 @@ namespace BoosterWatch
         private const string HoverLock = "BoosterWatch.Hover";
         // One place for the version the window and the log show (AssemblyInfo and the .version file
         // carry the same number).
-        public const string Version = "0.9.48";
+        public const string Version = "0.9.57";
         // Degrees of camera turn per unit of the mouse axis, which is what the stock camera feels
         // like. One wheel notch is 0.1, so a notch changes the distance by eight percent.
         private const float CameraTurnSpeed = 4f;
@@ -67,6 +71,7 @@ namespace BoosterWatch
             chuteHeightInput = settings.ChuteHeight.ToString("0", CultureInfo.InvariantCulture);
             ParachuteDeployment.OpenAboveGround = (float)settings.ChuteHeight;
             autoStageInput = settings.AutoStage; poweredInput = settings.PoweredLanding;
+            heatModeInput = settings.HeatMode; entryBurnInput = settings.EntryBurn;
             try { ParachuteGuard.Install(this); }
             catch (Exception e)
             {
@@ -132,6 +137,7 @@ namespace BoosterWatch
 
         public void Update()
         {
+            reconnect.Idle(Time.unscaledTime);
             if (toolbar == null && Time.unscaledTime >= nextToolbarAttempt)
             { nextToolbarAttempt = Time.unscaledTime + 1; AddToolbar(); }
             if (Input.GetKeyDown(KeyCode.B) && (Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt)))
@@ -313,6 +319,8 @@ namespace BoosterWatch
                     {
                         b.Restore();
                         b.Finished = true; b.Status = "Nicht mehr vorhanden (keine Bergung)";
+                        // In der Luft zerbrochen (Hitze, Luftkraefte) oder ohne gemeldeten Aufprall zerstoert.
+                        if (b.Result == BoosterResult.None) b.SetResult(BoosterResult.Destroyed);
                         SetJournalStatus(b, "Lost"); continue;
                     }
                     // The player switched to this booster: it is theirs now. No automat, no heat
@@ -320,6 +328,7 @@ namespace BoosterWatch
                     if (b.Vessel == FlightGlobals.ActiveVessel)
                     {
                         b.Restore(); b.Finished = true; b.Status = "Vom Spieler uebernommen";
+                        if (b.Result == BoosterResult.None) b.SetResult(BoosterResult.Ended);
                         SetJournalStatus(b, "Excluded"); continue;
                     }
                     // KSP reports a real physical contact; the tracked booster adds the case where
@@ -377,6 +386,7 @@ namespace BoosterWatch
                     if (b.Vessel.GetCrewCount() != 0 || !b.Vessel.mainBody.isHomeWorld)
                     {
                         b.Finished = true; b.Status = "Verfolgung beendet: Besatzung oder andere Welt";
+                        if (b.Result == BoosterResult.None) b.SetResult(BoosterResult.Ended);
                         b.Restore(); SetJournalStatus(b, "Excluded"); continue;
                     }
                     b.Measure(settings, autoRecovery);
@@ -566,6 +576,7 @@ namespace BoosterWatch
                 if (b.Finished || b.Anchor == null || b.Anchor.vessel == null || b.Anchor.vessel == b.Vessel) continue;
                 Vessel next = b.Anchor.vessel;
                 b.Restore(); b.Finished = true; b.Status = "Nach Stufentrennung weiterverfolgt";
+                if (b.Result == BoosterResult.None) b.SetResult(BoosterResult.Ended);
                 if (next == FlightGlobals.ActiveVessel || next.GetCrewCount() != 0 || !next.mainBody.isHomeWorld)
                 {
                     // Not taken over - the entry must not stay "Tracking", or the next load picks
@@ -597,6 +608,10 @@ namespace BoosterWatch
         {
             b.Finished = true;
             b.ImpactFailed = outcome != TouchdownOutcome.Safe;
+            // Ein Absturz ueberschreibt immer; eine Landung nur, solange noch nichts feststeht.
+            if (outcome == TouchdownOutcome.Crashed) { if (b.Result != BoosterResult.Crashed) b.SetResult(BoosterResult.Crashed); }
+            else if (b.Result == BoosterResult.None)
+                b.SetResult(outcome == TouchdownOutcome.Safe ? BoosterResult.Landed : BoosterResult.LandedUnconfirmed);
             string journalStatus = outcome == TouchdownOutcome.Crashed ? "Crashed"
                 : outcome == TouchdownOutcome.Safe ? "Touchdown" : "ContactUnconfirmed";
             b.Status = outcome == TouchdownOutcome.Crashed ? "Absturz / harter Aufprall - keine Bergung"
@@ -714,7 +729,9 @@ namespace BoosterWatch
                 // Remove stale snapshots of the same vessel, if the flight state's snapshot predates BackupVessel.
                 HighLogic.CurrentGame.flightState.protoVessels.RemoveAll(p => p.vesselID == b.Id);
                 entry.Status = "Recovered";
+                b.SetResult(BoosterResult.Recovered);
                 entry.Funds = Funding.Instance != null ? Funding.Instance.Funds - fundsBefore : 0;
+                b.ResultFunds = entry.Funds;
                 b.Status = "Aufgesetzt und geborgen"
                     + (entry.Funds > 0 ? " | +" + entry.Funds.ToString("N0") + " Funds" : "");
                 ScreenMessages.PostScreenMessage(Loc.Get("#PSR_Screen_Recovered", b.Name), 5, ScreenMessageStyle.UPPER_CENTER);
@@ -827,6 +844,7 @@ namespace BoosterWatch
             {
                 foreach (TrackedBooster b in boosters) b.Restore();
                 cameraFeed.Dispose();
+                reconnect.Dispose();
                 // The hatch on the stock stage box is only refreshed while the mod runs.
                 ClearBoxMarks();
                 notice = Loc.Get("#PSR_Notice_Deactivated");
@@ -887,6 +905,7 @@ namespace BoosterWatch
             ClearBoxMarks();
             foreach (TrackedBooster b in boosters) b.Restore();
             cameraFeed.Dispose();
+            reconnect.Dispose(); controlRoom.Dispose();
             InputLockManager.RemoveControlLock(HoverLock);
         }
     }
